@@ -1,0 +1,53 @@
+version: '3.9'
+
+# ══════════════════════════════════════════════════════════════════
+# docker-compose.yml — Infraestrutura local para desenvolvimento
+#
+# Sobe PostgreSQL e Redis com um comando:
+# docker compose up -d
+#
+# Para parar:
+# docker compose down
+#
+# Para apagar os dados (reset completo):
+# docker compose down -v
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: tribo-postgres
+    environment:
+      POSTGRES_DB: tribo
+      POSTGRES_USER: tribo
+      POSTGRES_PASSWORD: tribo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tribo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ─────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: tribo-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
