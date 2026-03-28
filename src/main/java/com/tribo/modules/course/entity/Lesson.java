@@ -3,6 +3,8 @@ package com.tribo.modules.course.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.io.Serial;
+import java.io.Serializable;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -13,7 +15,10 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class Lesson {
+public class Lesson implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -31,6 +36,7 @@ public class Lesson {
 
     /**
      * Chave do vídeo no Panda Video ou S3.
+     * Para Panda Video: é o video_id retornado pela API deles.
      * O LessonService usa essa chave para gerar a URL assinada.
      */
     @Column(name = "video_key")

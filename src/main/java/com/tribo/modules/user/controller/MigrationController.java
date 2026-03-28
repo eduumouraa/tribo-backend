@@ -26,14 +26,6 @@ import java.util.Map;
  * 2. Converter para JSON e chamar POST /api/v1/admin/migration/import
  * 3. Os alunos recebem email automático para definir nova senha
  * 4. A assinatura é marcada como provider=eduzz para auditoria
- *
- * Exemplo de payload:
- * {
- *   "students": [
- *     { "name": "João Silva", "email": "joao@email.com", "plan": "tribo" },
- *     { "name": "Ana Lima",   "email": "ana@email.com",  "plan": "combo" }
- *   ]
- * }
  */
 @RestController
 @RequestMapping("/api/v1/admin/migration")
@@ -63,7 +55,7 @@ public class MigrationController {
                     userRepository.findByEmail(student.email()).ifPresent(user -> {
                         user.setStatus(User.AccountStatus.ACTIVE);
                         userRepository.save(user);
-                        subscriptionService.activateFromMigration(user.getId(), student.plan());
+                        subscriptionService.activateManual(user.getId(), student.plan(), "eduzz");
                     });
                     skipped.add(student.email() + " (já existia — assinatura ativada)");
                 } else {
@@ -71,7 +63,6 @@ public class MigrationController {
                     User user = User.builder()
                             .name(student.name())
                             .email(student.email())
-                            // Senha bloqueada — usuário deve fazer reset
                             .passwordHash(passwordEncoder.encode(
                                     "MIGRATED_" + System.currentTimeMillis()))
                             .role(User.Role.STUDENT)
@@ -79,10 +70,9 @@ public class MigrationController {
                             .build();
 
                     userRepository.save(user);
-                    subscriptionService.activateFromMigration(user.getId(), student.plan());
+                    subscriptionService.activateManual(user.getId(), student.plan(), "eduzz");
 
                     // TODO: enviar email de boas-vindas com link de reset de senha
-                    // mailService.sendWelcomeMigrationEmail(user);
 
                     imported.add(student.email());
                     log.info("Aluno migrado: {} — plano: {}", student.email(), student.plan());
@@ -108,7 +98,7 @@ public class MigrationController {
     public record StudentData(
             String name,
             String email,
-            String plan       // tribo | financas | combo
+            String plan
     ) {}
 
     public record ImportRequest(

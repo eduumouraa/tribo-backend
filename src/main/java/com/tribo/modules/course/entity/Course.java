@@ -5,6 +5,8 @@ import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import java.io.Serial;
+import java.io.Serializable;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,7 +15,7 @@ import java.util.UUID;
 
 /**
  * Entidade de Curso.
- * Um curso tem módulos, que têm aulas.
+ * Implements Serializable para que o Redis consiga serializar o cache.
  */
 @Entity
 @Table(name = "courses")
@@ -22,7 +24,10 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class Course {
+public class Course implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -60,6 +65,7 @@ public class Course {
     /**
      * Metadados flexíveis em JSONB — o que você aprende, pré-requisitos.
      * Estrutura: { "whatYouLearn": [...], "requirements": [...] }
+     * Usamos LinkedHashMap (Serializable) para compatibilidade com Redis.
      */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
@@ -74,7 +80,9 @@ public class Course {
 
     /**
      * Módulos do curso — carregados apenas quando necessário (LAZY).
-     * Ordenados por sort_order.
+     * ATENÇÃO: Lazy collections NÃO são serializáveis pelo Redis.
+     * Por isso removemos o @Cacheable do findBySlug/findPublished no service
+     * e usamos DTOs para cache quando necessário.
      */
     @OneToMany(mappedBy = "course", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("sortOrder ASC")

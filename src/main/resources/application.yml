@@ -1,8 +1,10 @@
 # ══════════════════════════════════════════════════════
 # application.yml — Configuração base da aplicação
-# Valores sensíveis NUNCA ficam aqui — vêm de variáveis
-# de ambiente (.env ou secrets do Railway/AWS)
+# Valores sensíveis vêm de variáveis de ambiente (.env)
 # ══════════════════════════════════════════════════════
+
+server:
+  port: 8081
 
 spring:
   application:
@@ -11,21 +13,20 @@ spring:
   # ── Banco de Dados ──────────────────────────────────
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/tribo}
-    username: ${DB_USER:tribo}
-    password: ${DB_PASSWORD:tribo}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
     hikari:
-      maximum-pool-size: 20          # máximo de conexões simultâneas
+      maximum-pool-size: 20
       minimum-idle: 5
       connection-timeout: 30000
 
   # ── JPA / Hibernate ─────────────────────────────────
   jpa:
     hibernate:
-      ddl-auto: validate             # Flyway gerencia o schema — JPA só valida
-    open-in-view: false              # evita lazy loading fora de transações
+      ddl-auto: validate
+    open-in-view: false
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: false
 
   # ── Migrations (Flyway) ──────────────────────────────
@@ -34,7 +35,7 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
-  # ── Redis (cache e sessões) ──────────────────────────
+  # ── Redis ────────────────────────────────────────────
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -42,79 +43,49 @@ spring:
       password: ${REDIS_PASSWORD:}
       timeout: 2000ms
 
-  # ── Cache ────────────────────────────────────────────
+  # ── Cache: NONE por enquanto ─────────────────────────
+  # Reativar quando implementarmos DTOs serializáveis.
   cache:
-    type: redis
-    redis:
-      time-to-live: 900000           # 15 minutos padrão (em ms)
+    type: none
 
-  # ── Email (SES ou SMTP) ──────────────────────────────
+  # ── Email ────────────────────────────────────────────
   mail:
-    host: ${MAIL_HOST:email-smtp.sa-east-1.amazonaws.com}
+    host: ${MAIL_HOST:smtp.resend.com}
     port: ${MAIL_PORT:587}
-    username: ${MAIL_USERNAME:}
+    username: ${MAIL_USERNAME:resend}
     password: ${MAIL_PASSWORD:}
     properties:
       mail.smtp.auth: true
       mail.smtp.starttls.enable: true
 
-  # ── Virtual Threads (Java 21) ────────────────────────
-  # Permite dezenas de milhares de requisições concorrentes
-  # sem precisar de programação reativa
-  threads:
-    virtual:
-      enabled: true
-
 # ── JWT ──────────────────────────────────────────────
 jwt:
-  secret: ${JWT_SECRET}              # openssl rand -base64 32
-  access-expiration: 900             # 15 minutos (em segundos)
-  refresh-expiration: 604800         # 7 dias (em segundos)
+  secret: ${JWT_SECRET:tribo-change-this-in-production-min-32-chars}
+  access-expiration: ${JWT_ACCESS_EXPIRATION:900}       # 15 min em segundos
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800}  # 7 dias em segundos
 
-# ── Stripe ───────────────────────────────────────────
-stripe:
-  secret-key: ${STRIPE_SECRET_KEY}
-  webhook-secret: ${STRIPE_WEBHOOK_SECRET}
-  # IDs dos produtos no Stripe (criar no dashboard do Stripe)
-  product-tribo: ${STRIPE_PRODUCT_TRIBO:}
-  product-financas: ${STRIPE_PRODUCT_FINANCAS:}
+# ── SafeVideo (Eduzz) ────────────────────────────────
+safevideo:
+  token: ${SAFEVIDEO_TOKEN:}
+  player-url: ${SAFEVIDEO_PLAYER_URL:https://player.safevideo.com.br}
 
-# ── AWS / Panda Video ────────────────────────────────
-aws:
-  region: ${AWS_REGION:sa-east-1}
-  access-key: ${AWS_ACCESS_KEY_ID:}
-  secret-key: ${AWS_SECRET_ACCESS_KEY:}
-  s3-bucket: ${S3_BUCKET:}
-
+# ── Panda Video (fallback) ───────────────────────────
 panda:
-  api-key: ${PANDA_VIDEO_API_KEY:}  # chave do Panda Video (fase 1)
+  api-key: ${PANDA_API_KEY:}
+  player-url: ${PANDA_PLAYER_URL:https://player-vz-tribo.tv.pandavideo.com.br}
 
-# ── Email remetente ───────────────────────────────────
+# ── Stripe ──────────────────────────────────────────
+stripe:
+  secret-key: ${STRIPE_SECRET_KEY:}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+
+# ── CORS ─────────────────────────────────────────────
 app:
-  mail-from: ${MAIL_FROM:noreply@triboinvest.com.br}
   frontend-url: ${FRONTEND_URL:http://localhost:8080}
 
-# ── Actuator (health check para Railway/AWS) ─────────
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics
-  endpoint:
-    health:
-      show-details: when-authorized
-
-# ── Swagger / OpenAPI ────────────────────────────────
-springdoc:
-  api-docs:
-    path: /api-docs
-  swagger-ui:
-    path: /swagger-ui.html
-    operationsSorter: method
-
-# ── Logging ──────────────────────────────────────────
+# ── Logging ─────────────────────────────────────────
 logging:
   level:
     com.tribo: DEBUG
-    org.springframework.security: INFO
-    org.hibernate.SQL: INFO
+    org.springframework.security: WARN
+    org.hibernate.SQL: WARN

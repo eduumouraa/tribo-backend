@@ -8,10 +8,10 @@ import com.tribo.shared.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
@@ -19,8 +19,13 @@ import java.util.UUID;
 /**
  * Serviço de cursos.
  *
- * Cache Redis é usado nos endpoints mais acessados (listagem e detalhe).
- * O cache é invalidado quando um admin publica alterações.
+ * IMPORTANTE: As anotações @Cacheable foram REMOVIDAS intencionalmente.
+ * Entidades JPA com coleções LAZY não são serializáveis pelo Redis de forma
+ * segura. A solução correta é cachear DTOs — implementar futuramente quando
+ * o volume de requisições justificar.
+ *
+ * Alternativa rápida implementada: cache desabilitado por enquanto.
+ * O PostgreSQL com índices corretos é suficiente para o volume inicial.
  */
 @Service
 @RequiredArgsConstructor
@@ -36,43 +41,49 @@ public class CourseService {
 
     /**
      * Lista todos os cursos publicados com paginação.
-     * Cache de 15 minutos — cursos não mudam com frequência.
+     * Sem cache — PostgreSQL com índice em (status, sort_order) é rápido o suficiente.
      */
-    @Cacheable(value = "courses:published", key = "#pageable.pageNumber + '-' + #pageable.pageSize")
+    @Transactional(readOnly = true)
     public Page<Course> findPublished(Pageable pageable) {
-        return courseRepository.findByStatus(Course.CourseStatus.PUBLISHED, pageable);
+        log.debug("Buscando cursos publicados, pageable={}", pageable);
+        return courseRepository.findPublished(pageable);
     }
 
     /**
      * Retorna os cursos em destaque para o hero banner.
      */
-    @Cacheable(value = "courses:featured")
+    @Transactional(readOnly = true)
     public List<Course> findFeatured() {
+        log.debug("Buscando cursos em destaque");
         return courseRepository.findFeatured();
     }
 
     /**
      * Retorna o detalhe completo de um curso pelo slug, incluindo módulos e aulas.
+     * @Transactional garante que as coleções LAZY sejam carregadas dentro da sessão.
      * Apenas cursos publicados são visíveis para alunos.
      */
-    @Cacheable(value = "course:detail", key = "#slug")
+    @Transactional(readOnly = true)
     public Course findBySlug(String slug) {
-        return courseRepository.findBySlug(slug)
+        log.debug("Buscando curso por slug={}", slug);
+        Course course = courseRepository.findBySlugWithModulesAndLessons(slug)
                 .filter(c -> c.getStatus() == Course.CourseStatus.PUBLISHED)
                 .orElseThrow(() -> new ResourceNotFoundException("Curso não encontrado: " + slug));
+
+        // Força inicialização das coleções lazy dentro da transação
+        course.getModules().forEach(m -> m.getLessons().size());
+        return course;
     }
 
     /**
      * Gera a URL de stream para uma aula específica.
      *
      * Fluxo:
-     * 1. Busca a aula no banco e verifica se o usuário tem acesso
-     * 2. Chama o Panda Video (ou S3) para gerar uma URL assinada temporária
+     * 1. Busca a aula no banco e verifica se está publicada
+     * 2. Chama o Panda Video para gerar a URL de embed
      * 3. A URL expira em 2 horas — o player a renova automaticamente
-     *
-     * @param lessonId ID da aula
-     * @param userId   ID do usuário (para verificação de acesso)
      */
+    @Transactional(readOnly = true)
     public String generateStreamUrl(UUID lessonId, UUID userId) {
         Lesson lesson = lessonRepository.findById(lessonId)
                 .orElseThrow(() -> new ResourceNotFoundException("Aula não encontrada."));
@@ -80,6 +91,9 @@ public class CourseService {
         if (lesson.getVideoKey() == null || lesson.getVideoKey().isBlank()) {
             throw new ResourceNotFoundException("Vídeo ainda não disponível para esta aula.");
         }
+
+        log.info("Gerando URL de stream para lessonId={}, userId={}, provider={}",
+                lessonId, userId, lesson.getVideoProvider());
 
         return videoStreamService.generateUrl(lesson.getVideoKey(), lesson.getVideoProvider());
     }

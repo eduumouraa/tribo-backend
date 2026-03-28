@@ -1,19 +1,23 @@
 package com.tribo.modules.course.controller;
 
+import com.tribo.modules.auth.service.SubscriptionService;
 import com.tribo.modules.course.entity.Course;
 import com.tribo.modules.course.entity.Lesson;
 import com.tribo.modules.course.entity.Module;
 import com.tribo.modules.course.service.CourseService;
 import com.tribo.modules.course.service.VideoStreamService;
 import com.tribo.modules.user.entity.User;
+import com.tribo.shared.exception.BusinessException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -24,14 +28,19 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor
+@Slf4j
 @Tag(name = "Cursos", description = "Listagem, detalhe e stream de aulas")
 public class CourseController {
 
     private final CourseService courseService;
     private final VideoStreamService videoStreamService;
+    private final SubscriptionService subscriptionService;
+
+    // ── Endpoints públicos ────────────────────────────────────────
 
     @Operation(summary = "Listar cursos publicados com paginação")
     @GetMapping("/courses")
+    @Transactional(readOnly = true)
     public ResponseEntity<Page<CourseResponse>> findAll(
             @PageableDefault(size = 20, sort = "sortOrder") Pageable pageable
     ) {
@@ -41,6 +50,7 @@ public class CourseController {
 
     @Operation(summary = "Cursos em destaque para o hero banner")
     @GetMapping("/courses/featured")
+    @Transactional(readOnly = true)
     public ResponseEntity<List<CourseResponse>> featured() {
         List<Course> courses = courseService.findFeatured();
         return ResponseEntity.ok(courses.stream().map(this::toCourseResponse).collect(Collectors.toList()));
@@ -48,20 +58,54 @@ public class CourseController {
 
     @Operation(summary = "Detalhe completo do curso com módulos e aulas")
     @GetMapping("/courses/{slug}")
-    public ResponseEntity<CourseDetailResponse> findBySlug(@PathVariable String slug) {
+    public ResponseEntity<CourseDetailResponse> findBySlug(
+            @PathVariable String slug,
+            @AuthenticationPrincipal User currentUser
+    ) {
         Course course = courseService.findBySlug(slug);
-        return ResponseEntity.ok(toCourseDetailResponse(course));
+        boolean hasAccess = hasAccessToCourse(currentUser);
+        return ResponseEntity.ok(toCourseDetailResponse(course, hasAccess));
     }
 
-    @Operation(summary = "Gerar URL de stream para uma aula")
+    // ── Endpoints protegidos ─────────────────────────────────────
+
+    @Operation(summary = "Gerar URL de stream para uma aula — requer acesso ativo")
     @GetMapping("/lessons/{lessonId}/stream")
     public ResponseEntity<StreamResponse> getStreamUrl(
             @PathVariable UUID lessonId,
             @AuthenticationPrincipal User currentUser
     ) {
+        // Aulas de preview são liberadas para todos
+        // Para as demais, verifica se o aluno tem acesso
+        boolean isAdmin = currentUser.getRole() == User.Role.ADMIN
+                       || currentUser.getRole() == User.Role.OWNER;
+
+        if (!isAdmin) {
+            boolean hasSubscription = subscriptionService.hasActiveSubscription(currentUser.getId());
+            if (!hasSubscription) {
+                throw new BusinessException(
+                    "Você não tem acesso a este conteúdo. Adquira um plano para continuar."
+                );
+            }
+        }
+
         String url = courseService.generateStreamUrl(lessonId, currentUser.getId());
         Instant expiresAt = videoStreamService.getExpiration();
-        return ResponseEntity.ok(new StreamResponse(url, "panda", expiresAt.toString()));
+
+        log.info("Stream URL gerada para lessonId={}, userId={}", lessonId, currentUser.getId());
+        return ResponseEntity.ok(new StreamResponse(url, "safevideo", expiresAt.toString()));
+    }
+
+    // ── Helpers de acesso ─────────────────────────────────────────
+
+    private boolean hasAccessToCourse(User user) {
+        if (user == null) return false;
+        if (user.getRole() == User.Role.ADMIN || user.getRole() == User.Role.OWNER) return true;
+        try {
+            return subscriptionService.hasActiveSubscription(user.getId());
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // ── Mappers ──────────────────────────────────────────────────
@@ -70,30 +114,37 @@ public class CourseController {
         return new CourseResponse(
                 c.getId().toString(), c.getTitle(), c.getSlug(), c.getDescription(),
                 c.getThumbnailUrl(), c.getCategory(), c.getBadge(),
-                c.getStatus().name(), c.getLessonsCount(), c.getDurationSecs()
+                c.getStatus().name(), 0, 0
         );
     }
 
-    private LessonResponse toLessonResponse(Lesson l) {
+    private LessonResponse toLessonResponse(Lesson l, boolean hasAccess) {
+        // Se o aluno não tem acesso, esconde o video_key
+        String videoKey = (hasAccess || l.getIsPreview()) ? l.getVideoKey() : null;
         return new LessonResponse(
                 l.getId().toString(), l.getTitle(), l.getDescription(),
-                l.getDurationSecs(), l.getIsPreview(), l.getStatus().name(), l.getSortOrder()
+                l.getDurationSecs(), l.getIsPreview(), l.getStatus().name(),
+                l.getSortOrder(), videoKey, l.getVideoProvider()
         );
     }
 
-    private ModuleResponse toModuleResponse(Module m) {
+    private ModuleResponse toModuleResponse(Module m, boolean hasAccess) {
         return new ModuleResponse(
                 m.getId().toString(), m.getTitle(), m.getSortOrder(),
-                m.getLessons().stream().map(this::toLessonResponse).collect(Collectors.toList())
+                m.getLessons().stream()
+                        .map(l -> toLessonResponse(l, hasAccess))
+                        .collect(Collectors.toList())
         );
     }
 
-    private CourseDetailResponse toCourseDetailResponse(Course c) {
+    private CourseDetailResponse toCourseDetailResponse(Course c, boolean hasAccess) {
         return new CourseDetailResponse(
                 c.getId().toString(), c.getTitle(), c.getSlug(), c.getDescription(),
                 c.getThumbnailUrl(), c.getCategory(), c.getBadge(),
-                c.getStatus().name(), c.getLessonsCount(), c.getDurationSecs(),
-                c.getModules().stream().map(this::toModuleResponse).collect(Collectors.toList()),
+                c.getStatus().name(), 0, 0, hasAccess,
+                c.getModules().stream()
+                        .map(m -> toModuleResponse(m, hasAccess))
+                        .collect(Collectors.toList()),
                 c.getMetadata()
         );
     }
@@ -110,7 +161,8 @@ public class CourseController {
 
     public record LessonResponse(
             String id, String title, String description,
-            int durationSecs, boolean isPreview, String status, int sortOrder
+            int durationSecs, boolean isPreview, String status,
+            int sortOrder, String videoKey, String videoProvider
     ) {}
 
     public record ModuleResponse(
@@ -121,6 +173,7 @@ public class CourseController {
             String id, String title, String slug, String description,
             String thumbnailUrl, String category, String badge,
             String status, int lessonsCount, int durationSecs,
+            boolean hasAccess,
             List<ModuleResponse> modules, Object metadata
     ) {}
 }

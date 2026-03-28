@@ -1,8 +1,11 @@
 package com.tribo.modules.course.entity;
 
+import java.util.LinkedHashSet;
+import java.util.Set;
 import jakarta.persistence.*;
 import lombok.*;
-
+import java.io.Serial;
+import java.io.Serializable;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +18,10 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class Module {
+public class Module implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -39,5 +45,5 @@ public class Module {
     @OneToMany(mappedBy = "module", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sortOrder ASC")
     @Builder.Default
-    private List<Lesson> lessons = new ArrayList<>();
+    private Set<Lesson> lessons = new LinkedHashSet<>();
 }

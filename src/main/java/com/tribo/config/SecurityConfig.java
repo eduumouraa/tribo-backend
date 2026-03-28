@@ -58,8 +58,12 @@ public class SecurityConfig {
             // Regras de autorização
             .authorizeHttpRequests(auth -> auth
                 // Rotas públicas
+                // Rotas públicas
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/api/v1/webhooks/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/courses").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/courses/featured").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/courses/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/lessons/*/preview").permitAll()
 
                 // Swagger e Actuator
