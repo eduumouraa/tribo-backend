@@ -17,7 +17,7 @@ public interface CourseRepository extends JpaRepository<Course, UUID> {
 
     Optional<Course> findBySlug(String slug);
 
-    @Query("SELECT c FROM Course c WHERE c.status = com.tribo.modules.course.entity.Course.CourseStatus.PUBLISHED ORDER BY c.sortOrder ASC")
+    @Query("SELECT c FROM Course c WHERE c.status = 'PUBLISHED' ORDER BY c.sortOrder ASC")
     Page<Course> findPublished(Pageable pageable);
 
     @Query("SELECT c FROM Course c WHERE c.status = 'PUBLISHED' AND c.isFeatured = true ORDER BY c.sortOrder ASC")
