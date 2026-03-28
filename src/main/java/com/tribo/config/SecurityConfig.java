@@ -25,17 +25,9 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import java.util.List;
 
-/**
- * Configuração central de segurança da aplicação.
- *
- * - JWT stateless (sem sessão no servidor)
- * - CORS configurado para aceitar apenas o domínio do frontend
- * - Rotas públicas: /auth/**, /webhooks/**, Swagger, Actuator health
- * - Rotas protegidas: tudo mais exige Bearer token válido
- */
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity          // habilita @PreAuthorize nos controllers
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -45,69 +37,55 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            // Desabilita CSRF — desnecessário em APIs REST stateless
             .csrf(AbstractHttpConfigurer::disable)
-
-            // Configura CORS
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-
-            // Sem sessão — cada requisição é autenticada pelo JWT
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-
-            // Regras de autorização
             .authorizeHttpRequests(auth -> auth
-                // Rotas públicas
-                // Rotas públicas
+
+                // ── Públicos — sem autenticação ───────────────────
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/api/v1/webhooks/**").permitAll()
+                .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers("/swagger-ui/**", "/api-docs/**", "/swagger-ui.html").permitAll()
+
+                // Cursos — listagem e detalhe são públicos
+                // Stream de aulas requer autenticação (verificado no service)
                 .requestMatchers(HttpMethod.GET, "/api/v1/courses").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/courses/featured").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/courses/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/courses/*/lessons/*/preview").permitAll()
 
-                // Swagger e Actuator
-                .requestMatchers("/swagger-ui/**", "/api-docs/**", "/swagger-ui.html").permitAll()
-                .requestMatchers("/actuator/health").permitAll()
+                // ── Admin — apenas ADMIN e OWNER ──────────────────
+                .requestMatchers("/api/v1/admin/**").hasAnyRole("ADMIN", "OWNER")
 
-                // Tudo mais precisa de autenticação
+                // ── Autenticado — qualquer usuário logado ─────────
                 .anyRequest().authenticated()
             )
-
-            // Adiciona o filtro JWT antes do filtro padrão de autenticação
             .authenticationProvider(authenticationProvider())
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
-    /**
-     * CORS — permite apenas o domínio do frontend.
-     * Em produção, troque localhost:8080 pela URL real.
-     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-
-        // Lista de origens permitidas — adicione o domínio de produção aqui
         config.setAllowedOrigins(List.of(
-            "http://localhost:8080",
-            "http://localhost:3000",
-            "https://play.triboinvest.com.br"   // domínio de produção
+                "http://localhost:8080",
+                "http://localhost:3000",
+                "https://play.triboinvest.com.br",
+                "https://triboinvest.com.br",
+                "https://www.triboinvest.com.br"
         ));
-
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
-        config.setAllowCredentials(true);   // necessário para o cookie do refresh token
+        config.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/api/**", config);
         return source;
     }
 
-    /**
-     * Provider de autenticação — usa BCrypt para verificar senhas.
-     */
     @Bean
     public AuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
@@ -116,10 +94,6 @@ public class SecurityConfig {
         return provider;
     }
 
-    /**
-     * BCrypt com strength 12 — padrão recomendado para produção.
-     * Nunca armazene senhas em texto plano.
-     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder(12);
