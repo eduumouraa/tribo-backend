@@ -11,18 +11,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Entidade central de usuários.
- *
- * Implementa UserDetails para integração direta com Spring Security —
- * assim não precisamos de um wrapper separado.
- *
- * Roles disponíveis:
- * - STUDENT  → aluno comum com assinatura ativa
- * - ADMIN    → pode gerenciar cursos e usuários
- * - OWNER    → acesso total ao sistema
- * - SUPPORT  → pode ver dados de alunos mas não editar cursos
- */
 @Entity
 @Table(name = "users")
 @Getter
@@ -48,19 +36,11 @@ public class User implements UserDetails {
     @Column(name = "avatar_url")
     private String avatarUrl;
 
-    /**
-     * Role do usuário no sistema.
-     * Armazenado como string no banco para facilitar leitura direta.
-     */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default
     private Role role = Role.STUDENT;
 
-    /**
-     * Status da conta — PENDING até confirmar o email,
-     * ACTIVE após confirmação, SUSPENDED em caso de fraude.
-     */
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default
@@ -73,22 +53,15 @@ public class User implements UserDetails {
     @Column(name = "updated_at")
     private OffsetDateTime updatedAt;
 
-    // ── Campos calculados (não persistidos) ──────────────────────
+    @Column(name = "last_login_at")
+    private OffsetDateTime lastLoginAt;
 
-    /**
-     * Retorna true se a conta está ativa E tem assinatura ativa.
-     * O frontend usa esse campo para redirecionar para /oferta.
-     * A verificação de assinatura é feita pelo SubscriptionService.
-     */
     public boolean isActive() {
         return this.status == AccountStatus.ACTIVE;
     }
 
-    // ── UserDetails — integração com Spring Security ─────────────
-
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        // Prefixo ROLE_ é exigido pelo Spring Security para @PreAuthorize("hasRole('ADMIN')")
         return List.of(new SimpleGrantedAuthority("ROLE_" + role.name()));
     }
 
@@ -99,7 +72,7 @@ public class User implements UserDetails {
 
     @Override
     public String getUsername() {
-        return this.email;    // email é o identificador único
+        return this.email;
     }
 
     @Override
@@ -122,15 +95,13 @@ public class User implements UserDetails {
         return this.status == AccountStatus.ACTIVE;
     }
 
-    // ── Enums ────────────────────────────────────────────────────
-
     public enum Role {
         STUDENT, ADMIN, OWNER, SUPPORT
     }
 
     public enum AccountStatus {
-        PENDING,    // aguardando confirmação de email
-        ACTIVE,     // conta ativa
-        SUSPENDED   // suspensa por fraude ou inadimplência
+        PENDING,
+        ACTIVE,
+        SUSPENDED
     }
 }
