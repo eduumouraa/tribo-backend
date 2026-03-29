@@ -4,6 +4,7 @@ import com.tribo.modules.auth.service.SubscriptionService;
 import com.tribo.modules.course.entity.Course;
 import com.tribo.modules.course.entity.Lesson;
 import com.tribo.modules.course.entity.Module;
+import com.tribo.modules.course.repository.CourseRepository;
 import com.tribo.modules.course.service.CourseService;
 import com.tribo.modules.course.service.VideoStreamService;
 import com.tribo.modules.user.entity.User;
@@ -35,6 +36,7 @@ public class CourseController {
     private final CourseService courseService;
     private final VideoStreamService videoStreamService;
     private final SubscriptionService subscriptionService;
+    private final CourseRepository courseRepository;
 
     // ── Endpoints públicos ────────────────────────────────────────
 
@@ -75,8 +77,6 @@ public class CourseController {
             @PathVariable UUID lessonId,
             @AuthenticationPrincipal User currentUser
     ) {
-        // Aulas de preview são liberadas para todos
-        // Para as demais, verifica se o aluno tem acesso
         boolean isAdmin = currentUser.getRole() == User.Role.ADMIN
                        || currentUser.getRole() == User.Role.OWNER;
 
@@ -96,7 +96,7 @@ public class CourseController {
         return ResponseEntity.ok(new StreamResponse(url, "safevideo", expiresAt.toString()));
     }
 
-    // ── Helpers de acesso ─────────────────────────────────────────
+    // ── Helpers ──────────────────────────────────────────────────
 
     private boolean hasAccessToCourse(User user) {
         if (user == null) return false;
@@ -111,15 +111,16 @@ public class CourseController {
     // ── Mappers ──────────────────────────────────────────────────
 
     private CourseResponse toCourseResponse(Course c) {
+        int lessonsCount = courseRepository.countPublishedLessons(c.getId());
+        int durationSecs = courseRepository.sumPublishedDuration(c.getId());
         return new CourseResponse(
                 c.getId().toString(), c.getTitle(), c.getSlug(), c.getDescription(),
                 c.getThumbnailUrl(), c.getCategory(), c.getBadge(),
-                c.getStatus().name(), 0, 0
+                c.getStatus().name(), lessonsCount, durationSecs
         );
     }
 
     private LessonResponse toLessonResponse(Lesson l, boolean hasAccess) {
-        // Se o aluno não tem acesso, esconde o video_key
         String videoKey = (hasAccess || l.getIsPreview()) ? l.getVideoKey() : null;
         return new LessonResponse(
                 l.getId().toString(), l.getTitle(), l.getDescription(),
@@ -138,10 +139,12 @@ public class CourseController {
     }
 
     private CourseDetailResponse toCourseDetailResponse(Course c, boolean hasAccess) {
+        int lessonsCount = courseRepository.countPublishedLessons(c.getId());
+        int durationSecs = courseRepository.sumPublishedDuration(c.getId());
         return new CourseDetailResponse(
                 c.getId().toString(), c.getTitle(), c.getSlug(), c.getDescription(),
                 c.getThumbnailUrl(), c.getCategory(), c.getBadge(),
-                c.getStatus().name(), 0, 0, hasAccess,
+                c.getStatus().name(), lessonsCount, durationSecs, hasAccess,
                 c.getModules().stream()
                         .map(m -> toModuleResponse(m, hasAccess))
                         .collect(Collectors.toList()),
