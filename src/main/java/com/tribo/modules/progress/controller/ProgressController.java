@@ -1,5 +1,7 @@
 package com.tribo.modules.progress.controller;
 
+import com.tribo.modules.progress.entity.LessonProgress;
+import com.tribo.modules.progress.repository.ProgressRepository;
 import com.tribo.modules.progress.service.ProgressService;
 import com.tribo.modules.user.entity.User;
 import io.swagger.v3.oas.annotations.Operation;
@@ -10,16 +12,20 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
  * Controller de progresso do aluno.
  *
- * GET  /api/v1/progress/me              → progresso geral
- * GET  /api/v1/progress/me/continue     → "Continue Assistindo"
- * POST /api/v1/progress/lessons/{id}    → atualizar tempo assistido
- * PATCH /api/v1/progress/lessons/{id}/complete → marcar/desmarcar como concluída
+ * GET  /api/v1/progress/me                     → progresso geral por curso
+ * GET  /api/v1/progress/me/lessons              → progresso por AULA (usado pelo frontend)
+ * GET  /api/v1/progress/me/continue             → "Continue Assistindo"
+ * GET  /api/v1/progress/me/courses/{courseId}   → progresso de um curso específico
+ * POST /api/v1/progress/lessons/{id}            → atualizar tempo assistido
+ * PATCH /api/v1/progress/lessons/{id}/complete  → marcar/desmarcar como concluída
  */
 @RestController
 @RequestMapping("/api/v1/progress")
@@ -28,13 +34,83 @@ import java.util.UUID;
 public class ProgressController {
 
     private final ProgressService progressService;
+    private final ProgressRepository progressRepository;
 
-    @Operation(summary = "Progresso completo do aluno em todos os cursos")
+    @Operation(summary = "Progresso geral do aluno em todos os cursos")
     @GetMapping("/me")
     public ResponseEntity<Map<String, Object>> getMyProgress(
             @AuthenticationPrincipal User currentUser
     ) {
         return ResponseEntity.ok(progressService.getMyProgress(currentUser.getId()));
+    }
+
+    /**
+     * Retorna o progresso por AULA no formato que o frontend espera.
+     *
+     * Formato: {
+     *   "courseId1": {
+     *     "lessonId1": { "completed": true, "watchedSeconds": 480, "lastWatchedAt": 123456789 },
+     *     "lessonId2": { "completed": false, "watchedSeconds": 120, "lastWatchedAt": 123456789 }
+     *   }
+     * }
+     */
+    @Operation(summary = "Progresso por aula — formato otimizado para o frontend")
+    @GetMapping("/me/lessons")
+    public ResponseEntity<Map<String, Map<String, Object>>> getMyLessonsProgress(
+            @AuthenticationPrincipal User currentUser
+    ) {
+        List<LessonProgress> allProgress = progressRepository.findByUserId(currentUser.getId());
+
+        Map<String, Map<String, Object>> result = new HashMap<>();
+
+        for (LessonProgress p : allProgress) {
+            String courseId = p.getCourseId().toString();
+            String lessonId = p.getLessonId().toString();
+
+            result.computeIfAbsent(courseId, k -> new HashMap<>());
+
+            Map<String, Object> lessonData = new HashMap<>();
+            lessonData.put("completed", p.getIsCompleted());
+            lessonData.put("watchedSeconds", p.getWatchedSeconds());
+            lessonData.put("lastWatchedAt", p.getLastWatchedAt() != null
+                    ? p.getLastWatchedAt().toInstant().toEpochMilli() : null);
+
+            result.get(courseId).put(lessonId, lessonData);
+        }
+
+        return ResponseEntity.ok(result);
+    }
+
+    @Operation(summary = "Progresso de um curso específico")
+    @GetMapping("/me/courses/{courseId}")
+    public ResponseEntity<Map<String, Object>> getCourseProgress(
+            @PathVariable UUID courseId,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        List<LessonProgress> lessons = progressRepository
+                .findByUserIdAndCourseId(currentUser.getId(), courseId);
+
+        Map<String, Object> lessonMap = new HashMap<>();
+        for (LessonProgress p : lessons) {
+            Map<String, Object> lessonData = new HashMap<>();
+            lessonData.put("completed", p.getIsCompleted());
+            lessonData.put("watchedSeconds", p.getWatchedSeconds());
+            lessonData.put("lastWatchedAt", p.getLastWatchedAt() != null
+                    ? p.getLastWatchedAt().toInstant().toEpochMilli() : null);
+            lessonMap.put(p.getLessonId().toString(), lessonData);
+        }
+
+        long completed = lessons.stream().filter(LessonProgress::getIsCompleted).count();
+        Long totalWatched = lessons.stream()
+                .mapToLong(LessonProgress::getWatchedSeconds).sum();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("courseId", courseId.toString());
+        result.put("completedLessons", completed);
+        result.put("totalWatchedSeconds", totalWatched);
+        result.put("lessons", lessonMap);
+
+        return ResponseEntity.ok(result);
     }
 
     @Operation(summary = "Aulas em andamento para 'Continue Assistindo'")
@@ -66,9 +142,5 @@ public class ProgressController {
         return ResponseEntity.ok().build();
     }
 
-    // ── Request DTO ──────────────────────────────────────────────
-
-    public record WatchTimeRequest(
-            @Min(0) int watchedSeconds
-    ) {}
+    public record WatchTimeRequest(@Min(0) int watchedSeconds) {}
 }
