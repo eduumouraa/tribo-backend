@@ -2,19 +2,16 @@ package com.tribo;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
- * Ponto de entrada da aplicação Tribo Invest Play.
+ * Tribo Invest Play — Backend
  *
- * @EnableCaching  — ativa o cache Redis com @Cacheable
- * @EnableAsync    — permite métodos assíncronos com @Async (webhooks)
- * @EnableScheduling — permite jobs agendados com @Scheduled (flush de progresso)
+ * @EnableAsync    → emails e webhooks processados em background (@Async)
+ * @EnableScheduling → jobs agendados (expiração de assinatura, notificações)
  */
 @SpringBootApplication
-@EnableCaching
 @EnableAsync
 @EnableScheduling
 public class TriboApplication {

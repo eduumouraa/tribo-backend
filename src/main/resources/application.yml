@@ -89,3 +89,8 @@ logging:
     com.tribo: DEBUG
     org.springframework.security: WARN
     org.hibernate.SQL: WARN
+
+# ── Resend ─────────────────────────────────────────────
+resend:
+  api-key: ${RESEND_API_KEY:}
+  from: ${RESEND_FROM:Tribo Invest Play <noreply@triboinvest.com.br>}

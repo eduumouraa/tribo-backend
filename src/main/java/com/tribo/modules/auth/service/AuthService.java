@@ -3,6 +3,7 @@ package com.tribo.modules.auth.service;
 import com.tribo.modules.auth.dto.AuthDTOs.*;
 import com.tribo.modules.auth.dto.AuthDTOs.UserResponseMapper;
 import com.tribo.modules.auth.security.JwtService;
+import com.tribo.modules.notification.service.EmailService;
 import com.tribo.modules.user.entity.User;
 import com.tribo.modules.user.repository.UserRepository;
 import com.tribo.shared.exception.BusinessException;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -30,6 +32,7 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final RedisTemplate<String, String> redisTemplate;
     private final SubscriptionService subscriptionService;
+    private final EmailService emailService;
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
@@ -47,6 +50,10 @@ public class AuthService {
 
         userRepository.save(user);
         log.info("Novo usuário registrado: {}", user.getEmail());
+
+        // Email de boas-vindas — assíncrono, nunca derruba o registro
+        emailService.enviarBoasVindas(user.getEmail(), user.getName());
+
         return buildAuthResponse(user);
     }
 
@@ -63,7 +70,6 @@ public class AuthService {
         User user = userRepository.findByEmail(request.email())
                 .orElseThrow(() -> new BusinessException("Usuário não encontrado."));
 
-        // Salva o último login
         user.setLastLoginAt(OffsetDateTime.now());
         userRepository.save(user);
 
@@ -132,7 +138,7 @@ public class AuthService {
                 UserResponseMapper.from(user, hasActiveSubscription));
     }
 
-    private boolean hasSubscriptionSafely(java.util.UUID userId) {
+    private boolean hasSubscriptionSafely(UUID userId) {
         try {
             return subscriptionService.hasActiveSubscription(userId);
         } catch (Exception e) {
