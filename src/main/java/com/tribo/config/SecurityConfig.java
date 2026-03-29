@@ -13,12 +13,14 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HeadersConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -33,6 +35,7 @@ public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
     private final UserDetailsService userDetailsService;
+    private final RateLimitFilter rateLimitFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -41,16 +44,42 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
+            // ── Headers de segurança HTTP ──────────────────────────
+            .headers(headers -> headers
+                // Impede clickjacking
+                .frameOptions(HeadersConfigurer.FrameOptionsConfig::deny)
+                // Impede MIME sniffing
+                .contentTypeOptions(HeadersConfigurer.ContentTypeOptionsConfig::disable)
+                // Força HTTPS (HSTS) — ativo em produção
+                .httpStrictTransportSecurity(hsts -> hsts
+                    .includeSubDomains(true)
+                    .maxAgeInSeconds(31536000)
+                )
+                // Política de referência
+                .referrerPolicy(referrer -> referrer
+                    .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN)
+                )
+                // Content Security Policy
+                .contentSecurityPolicy(csp -> csp
+                    .policyDirectives("default-src 'self'; frame-ancestors 'none'")
+                )
+            )
+
             .authorizeHttpRequests(auth -> auth
 
                 // ── Públicos — sem autenticação ───────────────────
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/api/v1/webhooks/**").permitAll()
+
+                // Actuator — apenas health público, o resto protegido
                 .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers("/actuator/**").hasAnyRole("ADMIN", "OWNER")
+
+                // Swagger — apenas em dev (desabilitar em produção)
                 .requestMatchers("/swagger-ui/**", "/api-docs/**", "/swagger-ui.html").permitAll()
 
                 // Cursos — listagem e detalhe são públicos
-                // Stream de aulas requer autenticação (verificado no service)
                 .requestMatchers(HttpMethod.GET, "/api/v1/courses").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/courses/featured").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/courses/**").permitAll()
@@ -62,6 +91,8 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .authenticationProvider(authenticationProvider())
+            // Rate limit ANTES do JWT filter
+            .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
