@@ -2,6 +2,7 @@ package com.tribo.modules.course.service;
 
 import com.tribo.modules.course.entity.Course;
 import com.tribo.modules.course.entity.Lesson;
+import com.tribo.modules.course.entity.Module;
 import com.tribo.modules.course.repository.CourseRepository;
 import com.tribo.modules.course.repository.LessonRepository;
 import com.tribo.shared.exception.ResourceNotFoundException;
@@ -13,20 +14,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
-/**
- * Serviço de cursos.
- *
- * IMPORTANTE: As anotações @Cacheable foram REMOVIDAS intencionalmente.
- * Entidades JPA com coleções LAZY não são serializáveis pelo Redis de forma
- * segura. A solução correta é cachear DTOs — implementar futuramente quando
- * o volume de requisições justificar.
- *
- * Alternativa rápida implementada: cache desabilitado por enquanto.
- * O PostgreSQL com índices corretos é suficiente para o volume inicial.
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -39,19 +29,12 @@ public class CourseService {
     @Value("${panda.api-key:}")
     private String pandaApiKey;
 
-    /**
-     * Lista todos os cursos publicados com paginação.
-     * Sem cache — PostgreSQL com índice em (status, sort_order) é rápido o suficiente.
-     */
     @Transactional(readOnly = true)
     public Page<Course> findPublished(Pageable pageable) {
         log.debug("Buscando cursos publicados, pageable={}", pageable);
         return courseRepository.findPublished(pageable);
     }
 
-    /**
-     * Retorna os cursos em destaque para o hero banner.
-     */
     @Transactional(readOnly = true)
     public List<Course> findFeatured() {
         log.debug("Buscando cursos em destaque");
@@ -59,9 +42,11 @@ public class CourseService {
     }
 
     /**
-     * Retorna o detalhe completo de um curso pelo slug, incluindo módulos e aulas.
-     * @Transactional garante que as coleções LAZY sejam carregadas dentro da sessão.
-     * Apenas cursos publicados são visíveis para alunos.
+     * Retorna o detalhe completo de um curso pelo slug.
+     *
+     * O JOIN FETCH pode retornar módulos e aulas duplicadas no resultado
+     * do Hibernate quando há múltiplas coleções. Fazemos a deduplicação
+     * manualmente garantindo ordem correta por sortOrder.
      */
     @Transactional(readOnly = true)
     public Course findBySlug(String slug) {
@@ -70,19 +55,40 @@ public class CourseService {
                 .filter(c -> c.getStatus() == Course.CourseStatus.PUBLISHED)
                 .orElseThrow(() -> new ResourceNotFoundException("Curso não encontrado: " + slug));
 
-        // Força inicialização das coleções lazy dentro da transação
-        course.getModules().forEach(m -> m.getLessons().size());
+        // Deduplica módulos por ID mantendo ordem por sortOrder
+        List<Module> dedupedModules = course.getModules().stream()
+                .collect(Collectors.toMap(
+                        Module::getId,
+                        m -> m,
+                        (a, b) -> a,
+                        LinkedHashMap::new
+                ))
+                .values()
+                .stream()
+                .sorted(Comparator.comparingInt(Module::getSortOrder))
+                .collect(Collectors.toList());
+
+        // Deduplica aulas de cada módulo por ID mantendo ordem por sortOrder
+        dedupedModules.forEach(mod -> {
+            List<Lesson> dedupedLessons = mod.getLessons().stream()
+                    .collect(Collectors.toMap(
+                            Lesson::getId,
+                            l -> l,
+                            (a, b) -> a,
+                            LinkedHashMap::new
+                    ))
+                    .values()
+                    .stream()
+                    .sorted(Comparator.comparingInt(Lesson::getSortOrder))
+                    .collect(Collectors.toList());
+            mod.setLessons(new LinkedHashSet<>(dedupedLessons));
+        });
+
+        course.setModules(dedupedModules);
+
         return course;
     }
 
-    /**
-     * Gera a URL de stream para uma aula específica.
-     *
-     * Fluxo:
-     * 1. Busca a aula no banco e verifica se está publicada
-     * 2. Chama o Panda Video para gerar a URL de embed
-     * 3. A URL expira em 2 horas — o player a renova automaticamente
-     */
     @Transactional(readOnly = true)
     public String generateStreamUrl(UUID lessonId, UUID userId) {
         Lesson lesson = lessonRepository.findById(lessonId)
