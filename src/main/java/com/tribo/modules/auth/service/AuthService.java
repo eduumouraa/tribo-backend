@@ -2,6 +2,8 @@ package com.tribo.modules.auth.service;
 
 import com.tribo.modules.auth.dto.AuthDTOs.*;
 import com.tribo.modules.auth.dto.AuthDTOs.UserResponseMapper;
+import com.tribo.modules.auth.entity.PasswordResetToken;
+import com.tribo.modules.auth.repository.PasswordResetTokenRepository;
 import com.tribo.modules.auth.security.JwtService;
 import com.tribo.modules.notification.service.EmailService;
 import com.tribo.modules.user.entity.User;
@@ -33,6 +35,7 @@ public class AuthService {
     private final RedisTemplate<String, String> redisTemplate;
     private final SubscriptionService subscriptionService;
     private final EmailService emailService;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
@@ -51,7 +54,6 @@ public class AuthService {
         userRepository.save(user);
         log.info("Novo usuário registrado: {}", user.getEmail());
 
-        // Email de boas-vindas — assíncrono, nunca derruba o registro
         emailService.enviarBoasVindas(user.getEmail(), user.getName());
 
         return buildAuthResponse(user);
@@ -112,6 +114,58 @@ public class AuthService {
         } catch (Exception e) {
             log.warn("Redis indisponível no logout: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Solicita recuperação de senha.
+     * Responde sempre com sucesso para não revelar se o email existe.
+     */
+    @Transactional
+    public void forgotPassword(String email) {
+        userRepository.findByEmail(email).ifPresent(user -> {
+            // Invalida tokens anteriores do usuário
+            passwordResetTokenRepository.deleteByUserId(user.getId());
+
+            String token = UUID.randomUUID().toString().replace("-", "");
+            passwordResetTokenRepository.save(
+                PasswordResetToken.builder()
+                    .userId(user.getId())
+                    .token(token)
+                    .expiresAt(OffsetDateTime.now().plusHours(1))
+                    .build()
+            );
+
+            emailService.enviarRecuperacaoSenha(user.getEmail(), user.getName(), token);
+            log.info("Token de reset de senha gerado para: {}", email);
+        });
+    }
+
+    /**
+     * Redefine a senha usando o token recebido por email.
+     */
+    @Transactional
+    public void resetPassword(String token, String newPassword) {
+        PasswordResetToken resetToken = passwordResetTokenRepository.findByToken(token)
+                .orElseThrow(() -> new BusinessException("Link inválido ou já utilizado."));
+
+        if (resetToken.getUsed()) {
+            throw new BusinessException("Este link já foi utilizado. Solicite um novo.");
+        }
+
+        if (resetToken.isExpired()) {
+            throw new BusinessException("Link expirado. Solicite um novo link de recuperação.");
+        }
+
+        User user = userRepository.findById(resetToken.getUserId())
+                .orElseThrow(() -> new BusinessException("Usuário não encontrado."));
+
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+
+        resetToken.setUsed(true);
+        passwordResetTokenRepository.save(resetToken);
+
+        log.info("Senha redefinida com sucesso para userId={}", user.getId());
     }
 
     // ── Helpers ──────────────────────────────────────────────────
