@@ -71,6 +71,18 @@ public class Course implements Serializable {
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> metadata;
 
+    /**
+     * Plano necessário para assistir este curso.
+     * Valores: "free" | "tribo" | "financas" | "combo"
+     * - free    → qualquer usuário logado
+     * - tribo   → assinatura Tribo do Investidor ou Combo
+     * - financas → assinatura Organização Financeira ou Combo
+     * - combo   → somente Combo
+     */
+    @Column(name = "required_plan", nullable = false, length = 50)
+    @Builder.Default
+    private String requiredPlan = "tribo";
+
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private OffsetDateTime createdAt = OffsetDateTime.now();

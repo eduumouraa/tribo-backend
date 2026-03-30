@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- ── Desenvolvimento: legível no terminal ───────────────── -->
+    <springProfile name="!prod">
+        <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder>
+                <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+                <charset>UTF-8</charset>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+
+        <logger name="com.tribo" level="DEBUG"/>
+    </springProfile>
+
+    <!-- ── Produção: JSON estruturado para Railway/Datadog/Grafana ── -->
+    <springProfile name="prod">
+        <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"app":"tribo-backend","version":"1.0.0"}</customFields>
+                <!-- Inclui MDC automaticamente (traceId, userId, etc.) -->
+                <includeMdcKeyName>traceId</includeMdcKeyName>
+                <includeMdcKeyName>userId</includeMdcKeyName>
+                <includeMdcKeyName>requestId</includeMdcKeyName>
+                <!-- Remove campos desnecessários para economizar armazenamento -->
+                <fieldNames>
+                    <timestamp>timestamp</timestamp>
+                    <version>[ignore]</version>
+                    <levelValue>[ignore]</levelValue>
+                </fieldNames>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </root>
+
+        <!-- Suprime logs verbosos de libs externas em produção -->
+        <logger name="org.hibernate" level="WARN"/>
+        <logger name="org.springframework.security" level="WARN"/>
+        <logger name="org.springframework.cache" level="WARN"/>
+        <logger name="com.zaxxer.hikari" level="WARN"/>
+        <logger name="io.lettuce" level="WARN"/>
+        <logger name="com.stripe" level="INFO"/>
+    </springProfile>
+
+</configuration>

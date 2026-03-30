@@ -1,5 +1,6 @@
 package com.tribo.shared.exception;
 
+import com.tribo.shared.exception.RateLimitException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,9 +18,7 @@ import java.util.Map;
 
 /**
  * Tratamento centralizado de erros.
- *
  * NUNCA expõe stack traces ou detalhes internos para o cliente.
- * Retorna sempre um JSON padronizado com mensagem amigável.
  */
 @RestControllerAdvice
 @Slf4j
@@ -39,6 +38,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.NOT_FOUND)
                 .body(new ErrorResponse("NOT_FOUND", ex.getMessage()));
+    }
+
+    /**
+     * Acesso negado por plano insuficiente.
+     * Retorna informações para o frontend exibir o upsell correto.
+     */
+    @ExceptionHandler(PlanAccessException.class)
+    public ResponseEntity<PlanAccessErrorResponse> handlePlanAccess(PlanAccessException ex) {
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(new PlanAccessErrorResponse(
+                        "PLAN_UPGRADE_REQUIRED",
+                        ex.getMessage(),
+                        ex.getRequiredPlan(),
+                        ex.getCourseSlug(),
+                        "/checkout?plan=" + ex.getRequiredPlan()
+                ));
     }
 
     // ── Autenticação e autorização ──────────────────────────────
@@ -90,33 +106,43 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneric(Exception ex) {
-        // Log completo apenas no servidor — cliente não vê nada disso
         log.error("Erro interno não tratado: {}", ex.getMessage(), ex);
         return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(new ErrorResponse("INTERNAL_ERROR", "Ocorreu um erro interno. Tente novamente em instantes."));
+                .body(new ErrorResponse("INTERNAL_ERROR",
+                        "Ocorreu um erro interno. Tente novamente em instantes."));
     }
 
     // ── Response DTOs ───────────────────────────────────────────
 
-    public record ErrorResponse(
-            String code,
-            String message,
-            OffsetDateTime timestamp
-    ) {
+    public record ErrorResponse(String code, String message, OffsetDateTime timestamp) {
         public ErrorResponse(String code, String message) {
             this(code, message, OffsetDateTime.now());
         }
     }
 
     public record ValidationErrorResponse(
-            String code,
-            String message,
-            Map<String, String> errors,
-            OffsetDateTime timestamp
+            String code, String message,
+            Map<String, String> errors, OffsetDateTime timestamp
     ) {
         public ValidationErrorResponse(String code, String message, Map<String, String> errors) {
             this(code, message, errors, OffsetDateTime.now());
+        }
+    }
+
+    /**
+     * Resposta específica para acesso negado por plano.
+     * O frontend usa requiredPlan e upgradeUrl para exibir o upsell.
+     */
+    public record PlanAccessErrorResponse(
+            String code, String message,
+            String requiredPlan, String courseSlug,
+            String upgradeUrl, OffsetDateTime timestamp
+    ) {
+        public PlanAccessErrorResponse(String code, String message,
+                                        String requiredPlan, String courseSlug,
+                                        String upgradeUrl) {
+            this(code, message, requiredPlan, courseSlug, upgradeUrl, OffsetDateTime.now());
         }
     }
 }

@@ -50,4 +50,32 @@ public interface CourseRepository extends JpaRepository<Course, UUID> {
           AND l.status = 'PUBLISHED'
         """, nativeQuery = true)
     int sumPublishedDuration(@Param("courseId") UUID courseId);
+
+    /**
+     * Retorna o required_plan do curso a que a aula pertence.
+     * Usado para verificar acesso antes de gerar URL de stream.
+     */
+    @Query(value = """
+        SELECT c.required_plan
+        FROM courses c
+        JOIN modules m ON m.course_id = c.id
+        JOIN lessons l ON l.module_id = m.id
+        WHERE l.id = :lessonId
+        LIMIT 1
+        """, nativeQuery = true)
+    String findRequiredPlanByLessonId(@Param("lessonId") UUID lessonId);
+
+    /**
+     * Retorna o slug do curso a que a aula pertence.
+     * Usado para preencher o erro de acesso negado.
+     */
+    @Query(value = """
+        SELECT c.slug
+        FROM courses c
+        JOIN modules m ON m.course_id = c.id
+        JOIN lessons l ON l.module_id = m.id
+        WHERE l.id = :lessonId
+        LIMIT 1
+        """, nativeQuery = true)
+    String findSlugByLessonId(@Param("lessonId") UUID lessonId);
 }
