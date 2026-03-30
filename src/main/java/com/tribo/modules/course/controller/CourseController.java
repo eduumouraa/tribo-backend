@@ -9,6 +9,7 @@ import com.tribo.modules.course.service.CourseService;
 import com.tribo.modules.course.service.VideoStreamService;
 import com.tribo.modules.user.entity.User;
 import com.tribo.shared.exception.BusinessException;
+import com.tribo.shared.exception.PlanAccessException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -65,27 +66,34 @@ public class CourseController {
             @AuthenticationPrincipal User currentUser
     ) {
         Course course = courseService.findBySlug(slug);
-        boolean hasAccess = hasAccessToCourse(currentUser);
-        return ResponseEntity.ok(toCourseDetailResponse(course, hasAccess));
+
+        boolean isAdmin = isAdminOrOwner(currentUser);
+        boolean hasAccess = isAdmin || hasPlanAccess(currentUser, course.getRequiredPlan());
+
+        // Se não tem acesso, inclui qual plano é necessário para o frontend exibir upsell
+        String requiredPlanForFrontend = hasAccess ? null : course.getRequiredPlan();
+
+        return ResponseEntity.ok(toCourseDetailResponse(course, hasAccess, requiredPlanForFrontend));
     }
 
     // ── Endpoints protegidos ─────────────────────────────────────
 
-    @Operation(summary = "Gerar URL de stream para uma aula — requer acesso ativo")
+    @Operation(summary = "Gerar URL de stream para uma aula — requer plano ativo")
     @GetMapping("/lessons/{lessonId}/stream")
     public ResponseEntity<StreamResponse> getStreamUrl(
             @PathVariable UUID lessonId,
             @AuthenticationPrincipal User currentUser
     ) {
-        boolean isAdmin = currentUser.getRole() == User.Role.ADMIN
-                       || currentUser.getRole() == User.Role.OWNER;
+        if (!isAdminOrOwner(currentUser)) {
+            // Busca a aula para saber qual curso/plano é necessário
+            String requiredPlan = courseRepository.findRequiredPlanByLessonId(lessonId);
 
-        if (!isAdmin) {
-            boolean hasSubscription = subscriptionService.hasActiveSubscription(currentUser.getId());
-            if (!hasSubscription) {
-                throw new BusinessException(
-                    "Você não tem acesso a este conteúdo. Adquira um plano para continuar."
-                );
+            if (requiredPlan != null && !"free".equals(requiredPlan)) {
+                if (!subscriptionService.hasAccessToCourse(currentUser.getId(), requiredPlan)) {
+                    // Busca o slug para o erro
+                    String courseSlug = courseRepository.findSlugByLessonId(lessonId);
+                    throw new PlanAccessException(requiredPlan, courseSlug);
+                }
             }
         }
 
@@ -93,17 +101,23 @@ public class CourseController {
         Instant expiresAt = videoStreamService.getExpiration();
 
         log.info("Stream URL gerada para lessonId={}, userId={}", lessonId, currentUser.getId());
-        return ResponseEntity.ok(new StreamResponse(url, "safevideo", expiresAt.toString()));
+        return ResponseEntity.ok(new StreamResponse(url, "panda", expiresAt.toString()));
     }
 
     // ── Helpers ──────────────────────────────────────────────────
 
-    private boolean hasAccessToCourse(User user) {
+    private boolean isAdminOrOwner(User user) {
         if (user == null) return false;
-        if (user.getRole() == User.Role.ADMIN || user.getRole() == User.Role.OWNER) return true;
+        return user.getRole() == User.Role.ADMIN || user.getRole() == User.Role.OWNER;
+    }
+
+    private boolean hasPlanAccess(User user, String requiredPlan) {
+        if (user == null) return false;
+        if (requiredPlan == null || "free".equals(requiredPlan)) return true;
         try {
-            return subscriptionService.hasActiveSubscription(user.getId());
+            return subscriptionService.hasAccessToCourse(user.getId(), requiredPlan);
         } catch (Exception e) {
+            log.warn("Erro ao verificar acesso por plano para userId={}: {}", user.getId(), e.getMessage());
             return false;
         }
     }
@@ -116,7 +130,8 @@ public class CourseController {
         return new CourseResponse(
                 c.getId().toString(), c.getTitle(), c.getSlug(), c.getDescription(),
                 c.getThumbnailUrl(), c.getCategory(), c.getBadge(),
-                c.getStatus().name(), lessonsCount, durationSecs
+                c.getStatus().name(), lessonsCount, durationSecs,
+                c.getRequiredPlan()
         );
     }
 
@@ -138,7 +153,7 @@ public class CourseController {
         );
     }
 
-    private CourseDetailResponse toCourseDetailResponse(Course c, boolean hasAccess) {
+    private CourseDetailResponse toCourseDetailResponse(Course c, boolean hasAccess, String requiredPlan) {
         int lessonsCount = courseRepository.countPublishedLessons(c.getId());
         int durationSecs = courseRepository.sumPublishedDuration(c.getId());
         return new CourseDetailResponse(
@@ -148,7 +163,9 @@ public class CourseController {
                 c.getModules().stream()
                         .map(m -> toModuleResponse(m, hasAccess))
                         .collect(Collectors.toList()),
-                c.getMetadata()
+                c.getMetadata(),
+                requiredPlan,
+                requiredPlan != null ? "/checkout?plan=" + requiredPlan : null
         );
     }
 
@@ -159,7 +176,8 @@ public class CourseController {
     public record CourseResponse(
             String id, String title, String slug, String description,
             String thumbnailUrl, String category, String badge,
-            String status, int lessonsCount, int durationSecs
+            String status, int lessonsCount, int durationSecs,
+            String requiredPlan
     ) {}
 
     public record LessonResponse(
@@ -177,6 +195,8 @@ public class CourseController {
             String thumbnailUrl, String category, String badge,
             String status, int lessonsCount, int durationSecs,
             boolean hasAccess,
-            List<ModuleResponse> modules, Object metadata
+            List<ModuleResponse> modules, Object metadata,
+            String requiredPlan,
+            String upgradeUrl
     ) {}
 }

@@ -22,6 +22,8 @@
         <jjwt.version>0.12.5</jjwt.version>
         <stripe.version>24.3.0</stripe.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
+        <sentry.version>7.14.0</sentry.version>
+        <logstash.version>7.4</logstash.version>
     </properties>
 
     <dependencies>
@@ -149,6 +151,26 @@
             <version>2.5.0</version>
         </dependency>
 
+        <!-- ── Observabilidade: Sentry (error tracking + APM) ── -->
+        <dependency>
+            <groupId>io.sentry</groupId>
+            <artifactId>sentry-spring-boot-starter-jakarta</artifactId>
+            <version>${sentry.version}</version>
+        </dependency>
+
+        <!-- ── Observabilidade: Prometheus metrics (via Actuator) ── -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- ── Logging estruturado JSON (produção) ── -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash.version}</version>
+        </dependency>
+
         <!-- ── Testes ── -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -158,6 +180,17 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers para testes de integração com PostgreSQL + Redis reais -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
             <scope>test</scope>
         </dependency>
 
