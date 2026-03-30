@@ -13,11 +13,12 @@ import org.springframework.web.bind.annotation.*;
  * Controller de autenticação.
  * Todas as rotas são públicas (configurado no SecurityConfig).
  *
- * Endpoints:
- * POST /api/v1/auth/register  — cadastro
- * POST /api/v1/auth/login     — login
- * POST /api/v1/auth/refresh   — renovar access token
- * POST /api/v1/auth/logout    — logout (invalida refresh token)
+ * POST /api/v1/auth/register          — cadastro
+ * POST /api/v1/auth/login             — login
+ * POST /api/v1/auth/refresh           — renovar access token
+ * POST /api/v1/auth/logout            — logout (invalida refresh token)
+ * POST /api/v1/auth/forgot-password   — solicitar recuperação de senha
+ * POST /api/v1/auth/reset-password    — redefinir senha com token
  */
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -53,4 +54,23 @@ public class AuthController {
         }
         return ResponseEntity.ok().build();
     }
+
+    @Operation(summary = "Solicitar recuperação de senha — envia link por email")
+    @PostMapping("/forgot-password")
+    public ResponseEntity<MessageResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request.email());
+        // Sempre retorna sucesso para não revelar se o email existe
+        return ResponseEntity.ok(new MessageResponse(
+            "Se este email estiver cadastrado, você receberá as instruções em breve."
+        ));
+    }
+
+    @Operation(summary = "Redefinir senha com token recebido por email")
+    @PostMapping("/reset-password")
+    public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request.token(), request.newPassword());
+        return ResponseEntity.ok(new MessageResponse("Senha redefinida com sucesso. Faça login."));
+    }
+
+    public record MessageResponse(String message) {}
 }

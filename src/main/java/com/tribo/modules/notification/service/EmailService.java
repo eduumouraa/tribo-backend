@@ -156,6 +156,36 @@ public class EmailService {
         enviar(email, "Sua assinatura foi cancelada", html);
     }
 
+    @Async
+    public void enviarBoasVindasNovoPagante(String email, String nome, String plano, String resetToken) {
+        String nomePlano = switch (plano) {
+            case "financas" -> "Organização Financeira e Negociação de Dívidas";
+            case "combo" -> "Tribo Completo (todos os cursos)";
+            default -> "Tribo do Investidor";
+        };
+        String link = "https://play.triboinvest.com.br/reset-password?token=" + resetToken;
+
+        String html = """
+            <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px">
+              <div style="background:#1D9E75;padding:24px;border-radius:12px 12px 0 0;text-align:center">
+                <h1 style="color:#fff;margin:0;font-size:28px">Bem-vindo à Tribo! 🎉</h1>
+              </div>
+              <div style="background:#f9f9f9;padding:32px;border-radius:0 0 12px 12px">
+                <p style="font-size:16px;color:#333">Olá, <strong>%s</strong>!</p>
+                <p style="font-size:15px;color:#555">Seu acesso ao <strong>%s</strong> foi confirmado. Antes de começar, você precisa criar sua senha.</p>
+                <div style="text-align:center;margin:32px 0">
+                  <a href="%s" style="background:#1D9E75;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-size:16px;font-weight:bold">
+                    Criar Minha Senha
+                  </a>
+                </div>
+                <p style="font-size:13px;color:#999">Este link expira em 48 horas. Se você não realizou esta compra, entre em contato imediatamente.</p>
+              </div>
+            </div>
+            """.formatted(nome, nomePlano, link);
+
+        enviar(email, "Bem-vindo! Crie sua senha para acessar a Tribo 🚀", html);
+    }
+
     // ── Core de envio ─────────────────────────────────────────────
 
     private void enviar(String para, String assunto, String html) {

@@ -61,11 +61,25 @@ public class FavoritesController {
 
 @Embeddable
 class FavoriteId implements Serializable {
+
     @Column(name = "user_id")
     UUID userId;
 
     @Column(name = "course_id")
     UUID courseId;
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof FavoriteId that)) return false;
+        return java.util.Objects.equals(userId, that.userId)
+            && java.util.Objects.equals(courseId, that.courseId);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(userId, courseId);
+    }
 }
 
 // ── Entity ────────────────────────────────────────────────────────────────────
