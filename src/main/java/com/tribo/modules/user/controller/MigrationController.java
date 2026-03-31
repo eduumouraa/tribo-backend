@@ -1,6 +1,9 @@
 package com.tribo.modules.user.controller;
 
+import com.tribo.modules.auth.entity.PasswordResetToken;
+import com.tribo.modules.auth.repository.PasswordResetTokenRepository;
 import com.tribo.modules.auth.service.SubscriptionService;
+import com.tribo.modules.notification.service.EmailService;
 import com.tribo.modules.user.entity.User;
 import com.tribo.modules.user.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
@@ -12,9 +15,11 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Controller de migração da Eduzz para a nova plataforma.
@@ -38,6 +43,8 @@ public class MigrationController {
     private final UserRepository userRepository;
     private final SubscriptionService subscriptionService;
     private final PasswordEncoder passwordEncoder;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final EmailService emailService;
 
     @Operation(summary = "Importar alunos da Eduzz em lote")
     @PostMapping("/import")
@@ -72,7 +79,17 @@ public class MigrationController {
                     userRepository.save(user);
                     subscriptionService.activateManual(user.getId(), student.plan(), "eduzz");
 
-                    // TODO: enviar email de boas-vindas com link de reset de senha
+                    // Gera token de reset para o aluno definir sua senha (expira em 72h)
+                    String resetToken = UUID.randomUUID().toString().replace("-", "");
+                    passwordResetTokenRepository.save(
+                        PasswordResetToken.builder()
+                            .userId(user.getId())
+                            .token(resetToken)
+                            .expiresAt(OffsetDateTime.now().plusHours(72))
+                            .build()
+                    );
+                    emailService.enviarBoasVindasNovoPagante(
+                        user.getEmail(), user.getName(), student.plan(), resetToken);
 
                     imported.add(student.email());
                     log.info("Aluno migrado: {} — plano: {}", student.email(), student.plan());

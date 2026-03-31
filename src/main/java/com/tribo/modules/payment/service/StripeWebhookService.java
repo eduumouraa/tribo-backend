@@ -8,6 +8,7 @@ import com.tribo.modules.auth.entity.PasswordResetToken;
 import com.tribo.modules.auth.repository.PasswordResetTokenRepository;
 import com.tribo.modules.auth.service.SubscriptionService;
 import com.tribo.modules.notification.service.EmailService;
+import com.tribo.modules.notification.service.NotificationService;
 import com.tribo.modules.payment.entity.Subscription.SubscriptionStatus;
 import com.tribo.modules.payment.repository.SubscriptionRepository;
 import com.tribo.modules.user.entity.User;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -37,6 +39,7 @@ public class StripeWebhookService {
     private final SubscriptionService subscriptionService;
     private final SubscriptionRepository subscriptionRepository;
     private final EmailService emailService;
+    private final NotificationService notificationService;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
 
     /**
@@ -92,6 +95,11 @@ public class StripeWebhookService {
 
         subscriptionService.activate(user.getId(), plan, customerId, subscriptionId, eventId);
         log.info("Assinatura ativada para {} — plano: {}", customerEmail, plan);
+
+        notificationService.create(user.getId(), "payment",
+                "Pagamento confirmado!",
+                "Seu acesso ao plano " + plan + " foi ativado. Boas-vindas à Tribo!",
+                Map.of("plan", plan));
     }
 
     /**
@@ -118,9 +126,13 @@ public class StripeWebhookService {
                 subscriptionRepository.save(sub);
                 log.info("Assinatura {} marcada como CANCELLED", stripeSubscription.getId());
 
-                userRepository.findById(sub.getUserId()).ifPresent(user ->
-                    emailService.enviarAssinaturaCancelada(user.getEmail(), user.getName())
-                );
+                userRepository.findById(sub.getUserId()).ifPresent(user -> {
+                    emailService.enviarAssinaturaCancelada(user.getEmail(), user.getName());
+                    notificationService.create(user.getId(), "payment",
+                            "Assinatura cancelada",
+                            "Sua assinatura foi cancelada. Você mantém o acesso até o fim do período pago.",
+                            Map.of());
+                });
             }, () -> log.warn("Assinatura não encontrada no banco para stripeSubscriptionId={}",
                     stripeSubscription.getId()));
     }
@@ -148,9 +160,13 @@ public class StripeWebhookService {
             return;
         }
 
-        userRepository.findByEmail(customerEmail).ifPresent(user ->
-            emailService.enviarPagamentoFalhou(user.getEmail(), user.getName())
-        );
+        userRepository.findByEmail(customerEmail).ifPresent(user -> {
+            emailService.enviarPagamentoFalhou(user.getEmail(), user.getName());
+            notificationService.create(user.getId(), "payment",
+                    "Falha no pagamento",
+                    "Não conseguimos processar seu pagamento. Por favor, atualize seus dados de cobrança.",
+                    Map.of());
+        });
     }
 
     // ── Helpers ──────────────────────────────────────────────────

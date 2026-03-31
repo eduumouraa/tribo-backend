@@ -1,5 +1,7 @@
 package com.tribo.modules.progress.controller;
 
+import com.tribo.modules.achievement.service.AchievementService;
+import com.tribo.modules.certificate.service.CertificateService;
 import com.tribo.modules.progress.entity.LessonProgress;
 import com.tribo.modules.progress.repository.ProgressRepository;
 import com.tribo.modules.progress.service.ProgressService;
@@ -35,6 +37,8 @@ public class ProgressController {
 
     private final ProgressService progressService;
     private final ProgressRepository progressRepository;
+    private final AchievementService achievementService;
+    private final CertificateService certificateService;
 
     @Operation(summary = "Progresso geral do aluno em todos os cursos")
     @GetMapping("/me")
@@ -138,7 +142,12 @@ public class ProgressController {
             @PathVariable UUID lessonId,
             @AuthenticationPrincipal User currentUser
     ) {
-        progressService.toggleComplete(currentUser.getId(), lessonId);
+        LessonProgress progress = progressService.toggleComplete(currentUser.getId(), lessonId);
+        // Dispara conquistas e certificado apenas quando a aula é marcada como concluída
+        if (Boolean.TRUE.equals(progress.getIsCompleted())) {
+            achievementService.checkAndAward(currentUser.getId(), progress.getCourseId());
+            certificateService.generateIfCompleted(currentUser.getId(), progress.getCourseId());
+        }
         return ResponseEntity.ok().build();
     }
 

@@ -28,4 +28,12 @@ public interface ProgressRepository extends JpaRepository<LessonProgress, UUID> 
     /** Total de segundos assistidos pelo usuário em todos os cursos */
     @Query("SELECT COALESCE(SUM(p.watchedSeconds), 0) FROM LessonProgress p WHERE p.userId = :userId")
     Long sumWatchedSeconds(UUID userId);
+
+    /** Alias para AchievementService e CertificateService */
+    @Query("SELECT COALESCE(SUM(p.watchedSeconds), 0) FROM LessonProgress p WHERE p.userId = :userId")
+    long sumWatchedSecondsByUserId(UUID userId);
+
+    long countByUserIdAndIsCompleted(UUID userId, boolean isCompleted);
+
+    long countByUserIdAndCourseIdAndIsCompleted(UUID userId, UUID courseId, boolean isCompleted);
 }
