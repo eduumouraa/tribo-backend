@@ -79,7 +79,7 @@ public class PaymentController {
                             .build())
                     .putMetadata("plan", request.plan())
                     .putMetadata("userId", currentUser.getId().toString())
-                    .setSuccessUrl(frontendUrl + "/sucesso?session_id={CHECKOUT_SESSION_ID}")
+                    .setSuccessUrl(frontendUrl + "/pagamento-aprovado?session_id={CHECKOUT_SESSION_ID}")
                     .setCancelUrl(frontendUrl + "/planos");
 
             Session session = Session.create(builder.build());

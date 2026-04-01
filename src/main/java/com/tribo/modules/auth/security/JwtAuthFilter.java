@@ -2,6 +2,7 @@ package com.tribo.modules.auth.security;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -41,19 +42,33 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
+        // 1. Tenta Authorization header (Bearer token)
+        String token = null;
         final String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            token = authHeader.substring(7);
+        }
 
-        // Se não tem header Authorization ou não começa com "Bearer ", passa adiante
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        // 2. Fallback: lê cookie httpOnly "access_token"
+        if (token == null && request.getCookies() != null) {
+            for (Cookie cookie : request.getCookies()) {
+                if ("access_token".equals(cookie.getName())) {
+                    token = cookie.getValue();
+                    break;
+                }
+            }
+        }
+
+        if (token == null) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        final String token = authHeader.substring(7);
+        final String finalToken = token;
         final String userEmail;
 
         try {
-            userEmail = jwtService.extractEmail(token);
+            userEmail = jwtService.extractEmail(finalToken);
         } catch (Exception e) {
             // Token malformado ou assinatura inválida
             filterChain.doFilter(request, response);
@@ -61,7 +76,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
 
         // Verifica blacklist do Redis (tokens invalidados no logout)
-        String blacklistKey = "blacklist:token:" + token;
+        String blacklistKey = "blacklist:token:" + finalToken;
         if (Boolean.TRUE.equals(redisTemplate.hasKey(blacklistKey))) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.getWriter().write("{\"detail\":\"Token revogado. Faça login novamente.\"}");
@@ -72,7 +87,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             UserDetails userDetails = userDetailsService.loadUserByUsername(userEmail);
 
-            if (jwtService.isTokenValid(token, userDetails)) {
+            if (jwtService.isTokenValid(finalToken, userDetails)) {
                 UsernamePasswordAuthenticationToken authToken =
                         new UsernamePasswordAuthenticationToken(
                                 userDetails,

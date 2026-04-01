@@ -40,14 +40,20 @@ public class AuthDTOs {
     // ── Responses ────────────────────────────────────────────────
 
     /**
-     * Resposta do login — o frontend salva o accessToken no localStorage
-     * e usa o refreshToken (cookie HttpOnly) para renovar.
+     * Resposta interna do AuthService — tokens usados apenas para setar cookies.
+     * Nunca exposta diretamente ao cliente.
      */
     public record AuthResponse(
             String accessToken,
             String refreshToken,
             UserResponse user
     ) {}
+
+    /**
+     * Resposta pública do login/register/refresh.
+     * Tokens ficam em cookies httpOnly — corpo retorna apenas o usuário.
+     */
+    public record UserLoginResponse(UserResponse user) {}
 
     /**
      * Representação segura do usuário — sem dados sensíveis.
