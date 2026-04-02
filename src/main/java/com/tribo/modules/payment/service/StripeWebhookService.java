@@ -15,7 +15,6 @@ import com.tribo.modules.user.entity.User;
 import com.tribo.modules.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,10 +24,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Processa eventos do Stripe de forma assíncrona.
+ * Processa eventos do Stripe de forma síncrona.
  *
- * @Async garante que o controller responda ao Stripe em < 2s,
- * enquanto o processamento acontece em background.
+ * Sem @Async — o controller só responde 200 ao Stripe quando o processamento
+ * terminou com sucesso. Em caso de falha, o controller retorna 500 e o Stripe
+ * faz retry automático com backoff exponencial (até 72h).
  */
 @Service
 @RequiredArgsConstructor
@@ -45,10 +45,9 @@ public class StripeWebhookService {
     /**
      * Ativado quando o pagamento é aprovado no Stripe.
      *
-     * Metadados que precisam ser configurados no checkout do Stripe:
+     * Metadados que precisam estar configurados no Stripe Checkout:
      * - plan: "tribo" | "financas" | "combo"
      */
-    @Async
     @Transactional
     public void handleCheckoutCompleted(Session session, String eventId) {
         String customerEmail = session.getCustomerEmail();
@@ -65,8 +64,6 @@ public class StripeWebhookService {
             user = userOpt.get();
             user.setStatus(User.AccountStatus.ACTIVE);
             userRepository.save(user);
-
-            // Usuário já existia — notifica que o acesso foi renovado/liberado
             emailService.enviarAcessoLiberado(user.getEmail(), user.getName(), plan);
         } else {
             // Novo usuário via Stripe — cria conta com senha bloqueada
@@ -79,7 +76,7 @@ public class StripeWebhookService {
                     .build();
             userRepository.save(user);
 
-            // Token para criar a senha (expira em 48h — mais tempo que o reset normal)
+            // Token 48h para criar a senha (mais tempo que o reset normal de 1h)
             String resetToken = UUID.randomUUID().toString().replace("-", "");
             passwordResetTokenRepository.save(
                 PasswordResetToken.builder()
@@ -106,7 +103,6 @@ public class StripeWebhookService {
      * Ativado quando o usuário cancela a assinatura no Stripe.
      * O acesso continua até o fim do período pago (expiresAt permanece inalterado).
      */
-    @Async
     @Transactional
     public void handleSubscriptionCancelled(Event event) {
         log.info("Assinatura cancelada — event: {}", event.getId());
@@ -133,7 +129,65 @@ public class StripeWebhookService {
                             "Sua assinatura foi cancelada. Você mantém o acesso até o fim do período pago.",
                             Map.of());
                 });
-            }, () -> log.warn("Assinatura não encontrada no banco para stripeSubscriptionId={}",
+            }, () -> log.warn("Assinatura não encontrada para stripeSubscriptionId={}",
+                    stripeSubscription.getId()));
+    }
+
+    /**
+     * Ativado quando o plano da assinatura é alterado no Stripe (upgrade/downgrade).
+     * Atualiza o plano no banco e invalida o cache de assinatura.
+     */
+    @Transactional
+    public void handleSubscriptionUpdated(Event event) {
+        log.info("Assinatura atualizada — event: {}", event.getId());
+
+        Subscription stripeSubscription = (Subscription) event.getDataObjectDeserializer()
+                .getObject().orElse(null);
+
+        if (stripeSubscription == null) {
+            log.warn("Não foi possível desserializar Subscription do evento {}", event.getId());
+            return;
+        }
+
+        // Extrai o metadata do plano. O plano deve ser enviado como metadata
+        // na criação da Subscription no Stripe, assim como no Checkout.
+        String newPlan = null;
+        if (stripeSubscription.getMetadata() != null) {
+            newPlan = stripeSubscription.getMetadata().get("plan");
+        }
+
+        // Se não houver metadata de plano, tenta inferir pelo status da subscription
+        String stripeStatus = stripeSubscription.getStatus();
+
+        subscriptionRepository.findByStripeSubscriptionId(stripeSubscription.getId())
+            .ifPresentOrElse(sub -> {
+                boolean changed = false;
+
+                // Atualiza o plano se veio no metadata e é diferente do atual
+                if (newPlan != null && !newPlan.equals(sub.getPlan())) {
+                    log.info("Plano atualizado: {} → {} para stripeSubscriptionId={}",
+                            sub.getPlan(), newPlan, stripeSubscription.getId());
+                    sub.setPlan(newPlan);
+                    changed = true;
+                }
+
+                // Sincroniza status: se o Stripe marcou como active/past_due/etc
+                if ("active".equals(stripeStatus) && sub.getStatus() != SubscriptionStatus.ACTIVE) {
+                    sub.setStatus(SubscriptionStatus.ACTIVE);
+                    changed = true;
+                } else if ("past_due".equals(stripeStatus) || "unpaid".equals(stripeStatus)) {
+                    // Mantém ACTIVE por ora — handlePaymentFailed já notifica o usuário.
+                    // Após X falhas o Stripe dispara customer.subscription.deleted.
+                    log.warn("Assinatura {} com status Stripe: {}", stripeSubscription.getId(), stripeStatus);
+                }
+
+                if (changed) {
+                    subscriptionRepository.save(sub);
+                    // Invalida cache de assinatura para o usuário
+                    subscriptionService.evictCache(sub.getUserId());
+                }
+
+            }, () -> log.warn("Assinatura não encontrada para stripeSubscriptionId={}",
                     stripeSubscription.getId()));
     }
 
@@ -141,7 +195,6 @@ public class StripeWebhookService {
      * Ativado quando uma cobrança recorrente falha.
      * Após X tentativas, o Stripe dispara customer.subscription.deleted automaticamente.
      */
-    @Async
     @Transactional
     public void handlePaymentFailed(Event event) {
         log.warn("Pagamento falhou — event: {}", event.getId());
@@ -172,7 +225,6 @@ public class StripeWebhookService {
     // ── Helpers ──────────────────────────────────────────────────
 
     private String extractNameFromEmail(String email) {
-        // "joao.silva@gmail.com" → "Joao Silva"
         String local = email.split("@")[0].replace(".", " ").replace("_", " ");
         String[] parts = local.split(" ");
         StringBuilder name = new StringBuilder();

@@ -135,6 +135,15 @@ public class SubscriptionService {
     }
 
     /**
+     * Invalida o cache de assinatura de um usuário sem alterar o estado.
+     * Chamado após atualização de plano via webhook customer.subscription.updated.
+     */
+    @CacheEvict(value = "subscription-check", key = "#userId.toString()")
+    public void evictCache(UUID userId) {
+        log.debug("Cache de assinatura invalidado para userId={}", userId);
+    }
+
+    /**
      * Cancela assinatura — chamado pelo webhook Stripe ou pelo cancelamento na plataforma.
      */
     @CacheEvict(value = "subscription-check", key = "#userId.toString()")

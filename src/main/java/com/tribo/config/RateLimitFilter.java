@@ -14,15 +14,17 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Map;
 
 /**
- * Rate limiting no endpoint de login usando Redis como contador.
+ * Rate limiting por IP para endpoints sensíveis, usando Redis como contador.
  *
- * Estratégia: sliding window simplificada.
- * - Máximo de 10 tentativas por IP em 1 minuto.
- * - Após exceder: bloqueia por 5 minutos.
- * - Não usa Bucket4j — Redis puro, sem dependência extra.
+ * Endpoints e limites:
+ * - POST /api/v1/auth/login           → 10 tentativas / 1 min  (brute force)
+ * - POST /api/v1/auth/register        → 5 registros  / 10 min  (spam de contas)
+ * - POST /api/v1/auth/forgot-password → 5 tentativas / 10 min  (flood de emails)
  *
+ * Estratégia: sliding window simplificada com Redis INCR + EXPIRE.
  * Resiliente: se Redis estiver fora, permite a requisição (fail-open).
  */
 @Component
@@ -32,10 +34,13 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private final RedisTemplate<String, String> redisTemplate;
 
-    private static final String LOGIN_PATH = "/api/v1/auth/login";
-    private static final int MAX_ATTEMPTS = 10;
-    private static final Duration WINDOW = Duration.ofMinutes(1);
-    private static final Duration BLOCK_DURATION = Duration.ofMinutes(5);
+    private record RateLimitRule(int maxAttempts, Duration window, Duration blockDuration) {}
+
+    private static final Map<String, RateLimitRule> RULES = Map.of(
+        "/api/v1/auth/login",            new RateLimitRule(10, Duration.ofMinutes(1),  Duration.ofMinutes(5)),
+        "/api/v1/auth/register",         new RateLimitRule(5,  Duration.ofMinutes(10), Duration.ofMinutes(30)),
+        "/api/v1/auth/forgot-password",  new RateLimitRule(5,  Duration.ofMinutes(10), Duration.ofMinutes(30))
+    );
 
     @Override
     protected void doFilterInternal(
@@ -44,43 +49,46 @@ public class RateLimitFilter extends OncePerRequestFilter {
             FilterChain filterChain
     ) throws ServletException, IOException {
 
-        if (!LOGIN_PATH.equals(request.getRequestURI()) ||
-            !"POST".equalsIgnoreCase(request.getMethod())) {
+        if (!"POST".equalsIgnoreCase(request.getMethod())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        RateLimitRule rule = RULES.get(request.getRequestURI());
+        if (rule == null) {
             filterChain.doFilter(request, response);
             return;
         }
 
         String ip = extractIp(request);
-        String blockKey = "ratelimit:blocked:" + ip;
-        String countKey = "ratelimit:count:" + ip;
+        String slug     = request.getRequestURI().replace("/", ":");
+        String blockKey = "ratelimit:blocked:" + slug + ":" + ip;
+        String countKey = "ratelimit:count:"   + slug + ":" + ip;
 
         try {
-            // Verifica se IP está bloqueado
             if (Boolean.TRUE.equals(redisTemplate.hasKey(blockKey))) {
-                writeRateLimitResponse(response, "Muitas tentativas de login. Aguarde 5 minutos.");
-                log.warn("Login bloqueado por rate limit — IP={}", ip);
+                Long ttl = redisTemplate.getExpire(blockKey);
+                String msg = "Muitas tentativas. Aguarde " + formatTtl(ttl != null ? ttl : rule.blockDuration().getSeconds()) + ".";
+                writeRateLimitResponse(response, msg);
+                log.warn("Rate limit ativo — IP={}, endpoint={}", ip, request.getRequestURI());
                 return;
             }
 
-            // Incrementa contador
             Long attempts = redisTemplate.opsForValue().increment(countKey);
-
-            // Define expiração na primeira tentativa
             if (attempts != null && attempts == 1) {
-                redisTemplate.expire(countKey, WINDOW);
+                redisTemplate.expire(countKey, rule.window());
             }
 
-            // Bloqueia se excedeu o limite
-            if (attempts != null && attempts > MAX_ATTEMPTS) {
-                redisTemplate.opsForValue().set(blockKey, "blocked", BLOCK_DURATION);
+            if (attempts != null && attempts > rule.maxAttempts()) {
+                redisTemplate.opsForValue().set(blockKey, "blocked", rule.blockDuration());
                 redisTemplate.delete(countKey);
-                writeRateLimitResponse(response, "Muitas tentativas de login. Aguarde 5 minutos.");
-                log.warn("Rate limit ativado — IP={}, tentativas={}", ip, attempts);
+                String msg = "Muitas tentativas. Aguarde " + formatTtl(rule.blockDuration().getSeconds()) + ".";
+                writeRateLimitResponse(response, msg);
+                log.warn("Rate limit ativado — IP={}, endpoint={}, tentativas={}", ip, request.getRequestURI(), attempts);
                 return;
             }
 
         } catch (Exception e) {
-            // Redis fora do ar — fail-open para não bloquear o login
             log.warn("Redis indisponível no rate limit — permitindo requisição: {}", e.getMessage());
         }
 
@@ -93,6 +101,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return forwarded.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    private String formatTtl(long seconds) {
+        if (seconds >= 60) return (seconds / 60) + " minuto(s)";
+        return seconds + " segundo(s)";
     }
 
     private void writeRateLimitResponse(HttpServletResponse response, String message) throws IOException {

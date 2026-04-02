@@ -109,6 +109,14 @@ panda:
   player-url: ${PANDA_PLAYER_URL:https://player-vz-tribo.tv.pandavideo.com.br}
 
 # ── Stripe ──────────────────────────────────────────
+
+# ── CDN S3 (usado apenas se provider=s3 nas aulas) ───
+# CDN_SIGNING_SECRET deve ser um segredo forte (32+ chars).
+# O CDN valida ?expires= e ?sig= na borda.
+cdn:
+  signing-secret: ${CDN_SIGNING_SECRET:}
+  base-url: ${CDN_BASE_URL:https://cdn.triboinvest.com.br}
+
 stripe:
   secret-key: ${STRIPE_SECRET_KEY:}
   webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
