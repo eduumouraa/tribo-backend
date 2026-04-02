@@ -84,6 +84,9 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/courses/featured").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/courses/**").permitAll()
 
+                // Verificação pública de certificado — qualquer um pode checar a autenticidade
+                .requestMatchers(HttpMethod.GET, "/api/v1/certificates/verify/**").permitAll()
+
                 // ── Admin — apenas ADMIN e OWNER ──────────────────
                 .requestMatchers("/api/v1/admin/**").hasAnyRole("ADMIN", "OWNER")
 
