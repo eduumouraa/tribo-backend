@@ -11,14 +11,13 @@ import com.tribo.shared.exception.BusinessException;
 import com.tribo.shared.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,7 +35,26 @@ public class ForumService {
     @Transactional(readOnly = true)
     public Page<PostResponse> getFeed(int page, int size, User currentUser) {
         Page<ForumPost> posts = postRepository.findActiveFeed(PageRequest.of(page, size));
-        return posts.map(p -> toPostResponse(p, currentUser.getId()));
+        if (posts.isEmpty()) return posts.map(p -> toPostResponse(p, false, 0));
+
+        List<UUID> postIds = posts.map(ForumPost::getId).toList();
+        UUID userId = currentUser.getId();
+
+        // Batch: which posts has the viewer liked
+        Set<UUID> likedPostIds = postLikeRepository.findLikedPostIdsByUserId(userId, postIds);
+
+        // Batch: comment counts per post (avoids LAZY load of post.getComments())
+        Map<UUID, Long> commentCounts = commentRepository.countActiveByPostIds(postIds).stream()
+                .collect(Collectors.toMap(
+                        row -> (UUID) row[0],
+                        row -> (Long) row[1]
+                ));
+
+        return posts.map(p -> toPostResponse(
+                p,
+                likedPostIds.contains(p.getId()),
+                commentCounts.getOrDefault(p.getId(), 0L).intValue()
+        ));
     }
 
     @Transactional(readOnly = true)
@@ -60,7 +78,7 @@ public class ForumService {
                 .build();
         postRepository.save(post);
         log.info("Post criado por userId={}: {}", author.getId(), post.getId());
-        return toPostResponse(post, author.getId());
+        return toPostResponse(post, false, 0);
     }
 
     @Transactional
@@ -94,7 +112,7 @@ public class ForumService {
                 .build();
         commentRepository.save(comment);
         log.info("Comentário adicionado por userId={} no post={}", author.getId(), postId);
-        return toCommentResponse(comment, author.getId(), List.of());
+        return toCommentResponse(comment, author.getId(), Set.of(), List.of());
     }
 
     @Transactional
@@ -120,14 +138,18 @@ public class ForumService {
         boolean alreadyLiked = postLikeRepository.existsByUserIdAndPostId(userId, postId);
         if (alreadyLiked) {
             postLikeRepository.deleteByUserIdAndPostId(userId, postId);
-            post.setLikesCount(Math.max(0, post.getLikesCount() - 1));
+            postRepository.decrementLikesCount(postId);
+            return new LikeResponse(false, Math.max(0, post.getLikesCount() - 1));
         } else {
-            PostLike like = new PostLike(userId, postId, null);
-            postLikeRepository.save(like);
-            post.setLikesCount(post.getLikesCount() + 1);
+            try {
+                postLikeRepository.saveAndFlush(new PostLike(userId, postId, null));
+            } catch (DataIntegrityViolationException e) {
+                // Concurrent request already inserted the like
+                return new LikeResponse(true, post.getLikesCount());
+            }
+            postRepository.incrementLikesCount(postId);
+            return new LikeResponse(true, post.getLikesCount() + 1);
         }
-        postRepository.save(post);
-        return new LikeResponse(!alreadyLiked, post.getLikesCount());
     }
 
     @Transactional
@@ -138,29 +160,40 @@ public class ForumService {
         boolean alreadyLiked = commentLikeRepository.existsByUserIdAndCommentId(userId, commentId);
         if (alreadyLiked) {
             commentLikeRepository.deleteByUserIdAndCommentId(userId, commentId);
-            comment.setLikesCount(Math.max(0, comment.getLikesCount() - 1));
+            commentRepository.decrementLikesCount(commentId);
+            return new LikeResponse(false, Math.max(0, comment.getLikesCount() - 1));
         } else {
-            CommentLike like = new CommentLike(userId, commentId, null);
-            commentLikeRepository.save(like);
-            comment.setLikesCount(comment.getLikesCount() + 1);
+            try {
+                commentLikeRepository.saveAndFlush(new CommentLike(userId, commentId, null));
+            } catch (DataIntegrityViolationException e) {
+                return new LikeResponse(true, comment.getLikesCount());
+            }
+            commentRepository.incrementLikesCount(commentId);
+            return new LikeResponse(true, comment.getLikesCount() + 1);
         }
-        commentRepository.save(comment);
-        return new LikeResponse(!alreadyLiked, comment.getLikesCount());
     }
 
     // ── Posts do perfil ───────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public List<PostResponse> getPostsByUser(UUID authorId, User currentUser) {
-        return postRepository.findByAuthorId(authorId).stream()
-                .map(p -> toPostResponse(p, currentUser.getId()))
+        List<ForumPost> posts = postRepository.findByAuthorId(authorId);
+        if (posts.isEmpty()) return List.of();
+
+        List<UUID> postIds = posts.stream().map(ForumPost::getId).toList();
+        Set<UUID> likedPostIds = postLikeRepository.findLikedPostIdsByUserId(currentUser.getId(), postIds);
+        Map<UUID, Long> commentCounts = commentRepository.countActiveByPostIds(postIds).stream()
+                .collect(Collectors.toMap(row -> (UUID) row[0], row -> (Long) row[1]));
+
+        return posts.stream()
+                .map(p -> toPostResponse(p, likedPostIds.contains(p.getId()),
+                        commentCounts.getOrDefault(p.getId(), 0L).intValue()))
                 .toList();
     }
 
     // ── Mappers ───────────────────────────────────────────────────
 
-    private PostResponse toPostResponse(ForumPost post, UUID viewerId) {
-        boolean liked = postLikeRepository.existsByUserIdAndPostId(viewerId, post.getId());
+    private PostResponse toPostResponse(ForumPost post, boolean liked, int commentsCount) {
         return new PostResponse(
                 post.getId().toString(),
                 toAuthor(post.getAuthor()),
@@ -169,7 +202,7 @@ public class ForumService {
                 post.getBody(),
                 post.getLikesCount(),
                 liked,
-                post.getComments().size(),
+                commentsCount,
                 post.isPinned(),
                 post.getCreatedAt(),
                 post.getUpdatedAt()
@@ -179,13 +212,13 @@ public class ForumService {
     private PostDetailResponse toPostDetail(ForumPost post, List<ForumComment> allComments, UUID viewerId) {
         boolean liked = postLikeRepository.existsByUserIdAndPostId(viewerId, post.getId());
 
-        // Coleta IDs de comentários que o viewer curtiu
-        Set<UUID> likedCommentIds = allComments.stream()
-                .filter(c -> commentLikeRepository.existsByUserIdAndCommentId(viewerId, c.getId()))
-                .map(ForumComment::getId)
-                .collect(Collectors.toSet());
+        // Batch: all comment IDs the viewer liked — one query instead of N
+        Set<UUID> commentIds = allComments.stream().map(ForumComment::getId).collect(Collectors.toSet());
+        Set<UUID> likedCommentIds = commentIds.isEmpty()
+                ? Set.of()
+                : commentLikeRepository.findLikedCommentIdsByUserId(viewerId, commentIds);
 
-        // Separa raízes de respostas
+        // Build tree: roots first, then attach replies
         List<ForumComment> roots = allComments.stream()
                 .filter(c -> c.getParentId() == null)
                 .toList();
@@ -210,21 +243,6 @@ public class ForumService {
                 post.getCreatedAt(),
                 post.getUpdatedAt(),
                 commentResponses
-        );
-    }
-
-    private CommentResponse toCommentResponse(
-            ForumComment comment, UUID viewerId, List<CommentResponse> replies) {
-        boolean liked = commentLikeRepository.existsByUserIdAndCommentId(viewerId, comment.getId());
-        return new CommentResponse(
-                comment.getId().toString(),
-                toAuthor(comment.getAuthor()),
-                comment.getParentId() != null ? comment.getParentId().toString() : null,
-                comment.getBody(),
-                comment.getLikesCount(),
-                liked,
-                comment.getCreatedAt(),
-                replies
         );
     }
 
