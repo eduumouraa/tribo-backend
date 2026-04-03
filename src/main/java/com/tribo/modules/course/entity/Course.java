@@ -83,6 +83,16 @@ public class Course implements Serializable {
     @Builder.Default
     private String requiredPlan = "tribo";
 
+    /** Média das avaliações (desnormalizada para evitar AVG() a cada request). */
+    @Column(name = "rating_avg", nullable = false)
+    @Builder.Default
+    private Double ratingAvg = 0.0;
+
+    /** Total de avaliações recebidas. */
+    @Column(name = "rating_count", nullable = false)
+    @Builder.Default
+    private Integer ratingCount = 0;
+
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private OffsetDateTime createdAt = OffsetDateTime.now();

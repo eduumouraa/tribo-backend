@@ -6,6 +6,7 @@ import com.tribo.modules.forum.entity.ForumComment;
 import com.tribo.modules.forum.entity.ForumPost;
 import com.tribo.modules.forum.entity.PostLike;
 import com.tribo.modules.forum.repository.*;
+import com.tribo.modules.ranking.service.PointsService;
 import com.tribo.modules.user.entity.User;
 import com.tribo.shared.exception.BusinessException;
 import com.tribo.shared.exception.ResourceNotFoundException;
@@ -29,6 +30,7 @@ public class ForumService {
     private final ForumCommentRepository commentRepository;
     private final PostLikeRepository postLikeRepository;
     private final CommentLikeRepository commentLikeRepository;
+    private final PointsService pointsService;
 
     // ── Posts ─────────────────────────────────────────────────────
 
@@ -77,6 +79,7 @@ public class ForumService {
                 .body(request.body())
                 .build();
         postRepository.save(post);
+        pointsService.awardForumPost(author.getId(), post.getId());
         log.info("Post criado por userId={}: {}", author.getId(), post.getId());
         return toPostResponse(post, false, 0);
     }
@@ -111,6 +114,7 @@ public class ForumService {
                 .body(request.body())
                 .build();
         commentRepository.save(comment);
+        pointsService.awardForumComment(author.getId(), comment.getId());
         log.info("Comentário adicionado por userId={} no post={}", author.getId(), postId);
         return toCommentResponse(comment, author.getId(), Set.of(), List.of());
     }

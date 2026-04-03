@@ -5,6 +5,7 @@ import com.tribo.modules.course.entity.Course;
 import com.tribo.modules.course.entity.Lesson;
 import com.tribo.modules.course.entity.Module;
 import com.tribo.modules.course.repository.CourseRepository;
+import com.tribo.modules.course.repository.LessonMaterialRepository;
 import com.tribo.modules.course.service.CourseService;
 import com.tribo.modules.course.service.VideoStreamService;
 import com.tribo.modules.user.entity.User;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -38,6 +40,7 @@ public class CourseController {
     private final VideoStreamService videoStreamService;
     private final SubscriptionService subscriptionService;
     private final CourseRepository courseRepository;
+    private final LessonMaterialRepository materialRepository;
 
     // ── Endpoints públicos ────────────────────────────────────────
 
@@ -131,24 +134,27 @@ public class CourseController {
                 c.getId().toString(), c.getTitle(), c.getSlug(), c.getDescription(),
                 c.getThumbnailUrl(), c.getCategory(), c.getBadge(),
                 c.getStatus().name(), lessonsCount, durationSecs,
-                c.getRequiredPlan()
+                c.getRequiredPlan(), c.getRatingAvg(), c.getRatingCount()
         );
     }
 
-    private LessonResponse toLessonResponse(Lesson l, boolean hasAccess) {
+    private LessonResponse toLessonResponse(Lesson l, boolean hasAccess, int materialsCount) {
         String videoKey = (hasAccess || l.getIsPreview()) ? l.getVideoKey() : null;
+        boolean locked = !l.isAvailableNow();
+        String availableAt = l.getAvailableAt() != null ? l.getAvailableAt().toString() : null;
         return new LessonResponse(
                 l.getId().toString(), l.getTitle(), l.getDescription(),
                 l.getDurationSecs(), l.getIsPreview(), l.getStatus().name(),
-                l.getSortOrder(), videoKey, l.getVideoProvider()
+                l.getSortOrder(), videoKey, l.getVideoProvider(),
+                locked, availableAt, materialsCount
         );
     }
 
-    private ModuleResponse toModuleResponse(Module m, boolean hasAccess) {
+    private ModuleResponse toModuleResponse(Module m, boolean hasAccess, Map<UUID, Integer> materialCounts) {
         return new ModuleResponse(
                 m.getId().toString(), m.getTitle(), m.getSortOrder(),
                 m.getLessons().stream()
-                        .map(l -> toLessonResponse(l, hasAccess))
+                        .map(l -> toLessonResponse(l, hasAccess, materialCounts.getOrDefault(l.getId(), 0)))
                         .collect(Collectors.toList())
         );
     }
@@ -156,16 +162,31 @@ public class CourseController {
     private CourseDetailResponse toCourseDetailResponse(Course c, boolean hasAccess, String requiredPlan) {
         int lessonsCount = courseRepository.countPublishedLessons(c.getId());
         int durationSecs = courseRepository.sumPublishedDuration(c.getId());
+
+        // Batch: contagem de materiais por aula — evita N+1
+        List<UUID> allLessonIds = c.getModules().stream()
+                .flatMap(m -> m.getLessons().stream())
+                .map(Lesson::getId)
+                .collect(Collectors.toList());
+        Map<UUID, Integer> materialCounts = allLessonIds.isEmpty()
+                ? Map.of()
+                : materialRepository.countByLessonIds(allLessonIds).stream()
+                        .collect(Collectors.toMap(
+                                row -> (UUID) row[0],
+                                row -> ((Number) row[1]).intValue()
+                        ));
+
         return new CourseDetailResponse(
                 c.getId().toString(), c.getTitle(), c.getSlug(), c.getDescription(),
                 c.getThumbnailUrl(), c.getCategory(), c.getBadge(),
                 c.getStatus().name(), lessonsCount, durationSecs, hasAccess,
                 c.getModules().stream()
-                        .map(m -> toModuleResponse(m, hasAccess))
+                        .map(m -> toModuleResponse(m, hasAccess, materialCounts))
                         .collect(Collectors.toList()),
                 c.getMetadata(),
                 requiredPlan,
-                requiredPlan != null ? "/checkout?plan=" + requiredPlan : null
+                requiredPlan != null ? "/checkout?plan=" + requiredPlan : null,
+                c.getRatingAvg(), c.getRatingCount()
         );
     }
 
@@ -177,13 +198,14 @@ public class CourseController {
             String id, String title, String slug, String description,
             String thumbnailUrl, String category, String badge,
             String status, int lessonsCount, int durationSecs,
-            String requiredPlan
+            String requiredPlan, double ratingAvg, int ratingCount
     ) {}
 
     public record LessonResponse(
             String id, String title, String description,
             int durationSecs, boolean isPreview, String status,
-            int sortOrder, String videoKey, String videoProvider
+            int sortOrder, String videoKey, String videoProvider,
+            boolean locked, String availableAt, int materialsCount
     ) {}
 
     public record ModuleResponse(
@@ -197,6 +219,7 @@ public class CourseController {
             boolean hasAccess,
             List<ModuleResponse> modules, Object metadata,
             String requiredPlan,
-            String upgradeUrl
+            String upgradeUrl,
+            double ratingAvg, int ratingCount
     ) {}
 }

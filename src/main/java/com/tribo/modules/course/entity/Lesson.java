@@ -63,9 +63,23 @@ public class Lesson implements Serializable {
     @Builder.Default
     private LessonStatus status = LessonStatus.DRAFT;
 
+    /**
+     * Liberação programada (dripping).
+     * Se preenchido, a aula só aparece como disponível após esta data.
+     * NULL = disponível imediatamente quando status = PUBLISHED.
+     */
+    @Column(name = "available_at")
+    private OffsetDateTime availableAt;
+
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private OffsetDateTime createdAt = OffsetDateTime.now();
+
+    /** Retorna true se a aula pode ser assistida agora (publicada e sem drip pendente). */
+    public boolean isAvailableNow() {
+        if (status != LessonStatus.PUBLISHED) return false;
+        return availableAt == null || !OffsetDateTime.now().isBefore(availableAt);
+    }
 
     public enum LessonStatus {
         DRAFT, PUBLISHED

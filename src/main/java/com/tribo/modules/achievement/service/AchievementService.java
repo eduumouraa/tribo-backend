@@ -5,6 +5,7 @@ import com.tribo.modules.achievement.repository.AchievementRepository;
 import com.tribo.modules.course.repository.CourseRepository;
 import com.tribo.modules.notification.service.NotificationService;
 import com.tribo.modules.progress.repository.ProgressRepository;
+import com.tribo.modules.ranking.service.PointsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -28,6 +29,7 @@ public class AchievementService {
     private final ProgressRepository progressRepository;
     private final CourseRepository courseRepository;
     private final NotificationService notificationService;
+    private final PointsService pointsService;
 
     @Async
     @Transactional
@@ -83,6 +85,8 @@ public class AchievementService {
         notificationService.create(userId, "achievement",
                 "Conquista desbloqueada!", message,
                 Map.of("achievementType", type));
+
+        pointsService.awardAchievement(userId, type);
 
         log.info("Conquista {} concedida para userId={}", type, userId);
     }

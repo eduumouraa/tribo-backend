@@ -1,11 +1,13 @@
 package com.tribo.modules.progress.service;
 
+import com.tribo.modules.achievement.service.AchievementService;
 import com.tribo.modules.course.entity.Course;
 import com.tribo.modules.course.entity.Lesson;
 import com.tribo.modules.course.repository.CourseRepository;
 import com.tribo.modules.course.repository.LessonRepository;
 import com.tribo.modules.progress.entity.LessonProgress;
 import com.tribo.modules.progress.repository.ProgressRepository;
+import com.tribo.modules.ranking.service.PointsService;
 import com.tribo.shared.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +34,8 @@ public class ProgressService {
     private final ProgressRepository progressRepository;
     private final LessonRepository lessonRepository;
     private final CourseRepository courseRepository;
+    private final PointsService pointsService;
+    private final AchievementService achievementService;
 
     /**
      * Atualiza o tempo assistido de uma aula.
@@ -79,12 +83,28 @@ public class ProgressService {
                         .courseId(courseId)
                         .build());
 
-        boolean nowCompleted = !progress.getIsCompleted();
+        boolean wasCompleted = progress.getIsCompleted();
+        boolean nowCompleted = !wasCompleted;
         progress.setIsCompleted(nowCompleted);
         progress.setCompletedAt(nowCompleted ? OffsetDateTime.now() : null);
         progress.setLastWatchedAt(OffsetDateTime.now());
 
-        return progressRepository.save(progress);
+        LessonProgress saved = progressRepository.save(progress);
+
+        // Gamificação: concede pontos e verifica conquistas ao concluir (não ao desmarcar)
+        if (nowCompleted) {
+            pointsService.awardLessonComplete(userId, lessonId);
+            achievementService.checkAndAward(userId, courseId);
+
+            // Verifica se completou o curso inteiro
+            int totalLessons = courseRepository.countPublishedLessons(courseId);
+            long completedInCourse = progressRepository.countByUserIdAndCourseIdAndIsCompleted(userId, courseId, true);
+            if (totalLessons > 0 && completedInCourse >= totalLessons) {
+                pointsService.awardCourseComplete(userId, courseId);
+            }
+        }
+
+        return saved;
     }
 
     /**
