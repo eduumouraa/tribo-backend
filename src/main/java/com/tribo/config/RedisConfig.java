@@ -49,7 +49,6 @@ public class RedisConfig {
                         "subscription-check", subCheckConfig,
                         "published-courses",  coursesConfig
                 ))
-                .transactionAware()
                 .build();
     }
 }

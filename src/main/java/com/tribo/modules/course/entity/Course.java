@@ -84,7 +84,7 @@ public class Course implements Serializable {
     private String requiredPlan = "tribo";
 
     /** Média das avaliações (desnormalizada para evitar AVG() a cada request). */
-    @Column(name = "rating_avg", nullable = false)
+    @Column(name = "rating_avg", nullable = false, columnDefinition = "NUMERIC(3,2)")
     @Builder.Default
     private Double ratingAvg = 0.0;
 

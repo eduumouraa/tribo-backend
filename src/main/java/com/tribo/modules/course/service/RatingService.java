@@ -42,7 +42,7 @@ public class RatingService {
                         .userId(userId)
                         .build());
 
-        rating.setRating(stars);
+        rating.setRating((short) stars);
         rating.setReview(review);
         rating.setUpdatedAt(OffsetDateTime.now());
         ratingRepository.save(rating);

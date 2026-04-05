@@ -4,6 +4,15 @@
 # ══════════════════════════════════════════════════════
 
 spring:
+  # Em dev, usa cache em memória — sem precisar de Redis rodando localmente
+  cache:
+    type: simple
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
   jpa:
     properties:
       hibernate:

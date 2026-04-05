@@ -27,8 +27,8 @@ public class CourseRating {
     private UUID userId;
 
     /** 1 a 5 estrelas */
-    @Column(nullable = false)
-    private Integer rating;
+    @Column(nullable = false, columnDefinition = "SMALLINT")
+    private Short rating;
 
     @Column(columnDefinition = "TEXT")
     private String review;
