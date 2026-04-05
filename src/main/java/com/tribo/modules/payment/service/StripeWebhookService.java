@@ -151,13 +151,12 @@ public class StripeWebhookService {
 
         // Extrai o metadata do plano. O plano deve ser enviado como metadata
         // na criação da Subscription no Stripe, assim como no Checkout.
-        String newPlan = null;
-        if (stripeSubscription.getMetadata() != null) {
-            newPlan = stripeSubscription.getMetadata().get("plan");
-        }
+        final String newPlan = stripeSubscription.getMetadata() != null
+                ? stripeSubscription.getMetadata().get("plan")
+                : null;
 
         // Se não houver metadata de plano, tenta inferir pelo status da subscription
-        String stripeStatus = stripeSubscription.getStatus();
+        final String stripeStatus = stripeSubscription.getStatus();
 
         subscriptionRepository.findByStripeSubscriptionId(stripeSubscription.getId())
             .ifPresentOrElse(sub -> {

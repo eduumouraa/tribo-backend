@@ -62,6 +62,11 @@ spring:
 
   # ── Redis ────────────────────────────────────────────
   data:
+    # Limita ?size= a no máximo 100 para evitar abusos de memória
+    web:
+      pageable:
+        max-page-size: 100
+        default-page-size: 20
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}

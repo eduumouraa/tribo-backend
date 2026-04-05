@@ -39,10 +39,11 @@ public class RankingController {
             if (position > limit) break;
             UUID userId = (UUID) row[0];
             long totalPoints = ((Number) row[1]).longValue();
+            final int currentPosition = position;
 
             userRepository.findById(userId).ifPresent(user ->
                 result.add(new RankingEntry(
-                    position,
+                    currentPosition,
                     userId.toString(),
                     user.getName(),
                     user.getAvatarUrl(),

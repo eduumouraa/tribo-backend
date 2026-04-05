@@ -56,6 +56,9 @@ public class User implements UserDetails {
     @Column(name = "last_login_at")
     private OffsetDateTime lastLoginAt;
 
+    @Column(name = "onboarding_data", columnDefinition = "TEXT")
+    private String onboardingData;
+
     public boolean isActive() {
         return this.status == AccountStatus.ACTIVE;
     }

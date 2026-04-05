@@ -54,6 +54,9 @@ public class UserController {
         if (request.avatarUrl() != null) {
             user.setAvatarUrl(request.avatarUrl());
         }
+        if (request.onboardingData() != null) {
+            user.setOnboardingData(request.onboardingData());
+        }
         user.setUpdatedAt(OffsetDateTime.now());
         userRepository.save(user);
 
@@ -109,7 +112,8 @@ public class UserController {
 
     public record UpdateProfileRequest(
             @Size(min = 2, max = 120) String name,
-            String avatarUrl
+            String avatarUrl,
+            String onboardingData
     ) {}
 
     public record ChangePasswordRequest(
